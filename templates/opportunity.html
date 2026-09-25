@@ -8,7 +8,7 @@
 <h1 style="font-size:27px;margin-bottom:4px">{{opp.customer_name}}</h1>
 <div class="sub">{{opp.project}}{% if opp.location %} · {{opp.location}}{% endif %}</div>
 <p style="margin-bottom:0">
-<span class="pill {% if opp.status=='Needs you' %}red{% elif opp.status in ['Ready to send','Accepted'] %}green{% else %}amber{% endif %}">{{opp.status}}</span>
+<span class="pill {% if opp.status=='Needs you' %}red{% elif opp.status in ['Ready to send','Accepted'] %}green{% elif opp.status=='Awaiting customer' %}blue{% else %}amber{% endif %}">{{opp.status}}</span>
 {% if opp.objection %}<span class="pill amber">{{opp.objection}}</span>{% endif %}
 {% if opp.confidence is not none %}<span class="pill blue">{{(opp.confidence*100)|round|int}}% confidence</span>{% endif %}
 </p>
