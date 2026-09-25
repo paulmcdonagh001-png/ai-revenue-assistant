@@ -1,9 +1,9 @@
 {% extends "layout.html" %}{% block content %}
-<h1>Test Inbox</h1><div class="sub">Paste a fictional customer email. The backend will classify it and update/create the opportunity.</div>
+<h1>Test Inbox</h1><div class="sub">This sample is pre-filled. Click Ingest test email to see the backend classify it and update the opportunity.</div>
 <div class="grid2" style="margin-top:18px">
 <form class="card" method="post">
-<div class="field"><label>Customer name</label><input name="customer_name" placeholder="Sarah Smith"></div>
-<div class="field"><label>Sender email</label><input name="sender" type="email" required placeholder="sarah@example.com"></div>
+<div class="field"><label>Customer name</label><input name="customer_name" value="Sarah Smith"></div>
+<div class="field"><label>Sender email</label><input name="sender" type="email" required value="sarah@example.com"></div>
 <div class="field"><label>Project</label><input name="project" value="Patio replacement"></div>
 <div class="field"><label>Quote value</label><input name="quote_value" type="number" value="8450"></div>
 <div class="field"><label>Subject</label><input name="subject" value="Re: Patio quotation"></div>
