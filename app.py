@@ -1781,6 +1781,15 @@ def auto_sync_pulse():
     })
 
 
+@app.route("/internal/test-auto-sync-cron", methods=["POST"])
+def test_auto_sync_cron():
+    # Test-phase background checker. It is intentionally restricted by
+    # sync_test_gmail_messages() to [ARA TEST] inbox messages only.
+    state = maybe_auto_sync()
+    status = 200 if not state.get("error") else 503
+    return jsonify({"ok": not bool(state.get("error")), **state}), status
+
+
 @app.route("/internal/auto-sync", methods=["POST"])
 def internal_auto_sync():
     provided = request.headers.get("X-Auto-Sync-Key", "")
