@@ -22,8 +22,12 @@
 
 <div class="card" style="margin-top:18px">
 <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-<div><h2 style="margin:0">Reply assistant</h2><div class="small">AI prepares it. You supply business facts and approve it. Nothing is sent automatically.</div></div>
+<div><h2 style="margin:0">{% if opp.status=='Follow-up due' %}Follow-up assistant{% else %}Reply assistant{% endif %}</h2><div class="small">{% if opp.status=='Follow-up due' %}The customer has not replied. AI can prepare a gentle chase for you to approve.{% else %}AI prepares it. You supply business facts and approve it. Nothing is sent automatically.{% endif %}</div></div>
+{% if opp.status=='Follow-up due' %}
+<form method="post" action="/opportunity/{{opp.id}}/follow-up-draft"><button class="btn primary" type="submit">{% if draft and draft.draft_type=='follow_up' %}Regenerate follow-up{% else %}Generate follow-up draft{% endif %}</button></form>
+{% else %}
 <form method="post" action="/opportunity/{{opp.id}}/draft-reply"><button class="btn" type="submit">{% if draft %}Start a fresh draft{% else %}Generate reply draft{% endif %}</button></form>
+{% endif %}
 </div>
 
 {% if draft %}
@@ -71,7 +75,7 @@
 <div class="notice" style="margin-top:14px"><b>Reply sent</b><div class="small" style="margin-top:5px">{{draft.sent_at}} · message recorded in the activity log. This draft cannot be sent twice.</div></div>
 {% endif %}
 {% else %}
-<div class="sub" style="margin-top:14px">Generate a draft after reviewing the customer questions. If the assistant needs a price, date or scope decision, it will ask you here instead of guessing.</div>
+<div class="sub" style="margin-top:14px">{% if opp.status=='Follow-up due' %}This job has gone quiet. Generate a short follow-up, review it, then approve it if you want to send it.{% else %}Generate a draft after reviewing the customer questions. If the assistant needs a price, date or scope decision, it will ask you here instead of guessing.{% endif %}</div>
 {% endif %}
 </div>
 
