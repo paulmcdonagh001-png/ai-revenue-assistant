@@ -1,0 +1,20 @@
+{% extends "layout.html" %}{% block content %}
+<h1>Good morning, Paul</h1><div class="sub">The database is now driving this dashboard.</div>
+<div class="cards">
+<div class="card"><div class="label">Open pipeline</div><div class="value">{{ money(metrics.open) }}</div></div>
+<div class="card"><div class="label">Requires attention</div><div class="value">{{ money(metrics.needs) }}</div><span class="pill red">Owner action</span></div>
+<div class="card"><div class="label">AI can follow up</div><div class="value">{{ money(metrics.ready) }}</div><span class="pill green">Ready</span></div>
+<div class="card"><div class="label">Accepted in database</div><div class="value">{{ money(metrics.accepted) }}</div></div>
+</div>
+<div class="card">
+<div style="display:flex;justify-content:space-between;align-items:center"><div><h2>Opportunities</h2><div class="sub">Click any job to view its record.</div></div><a class="btn primary" href="/test-inbox">Simulate an email</a></div>
+<table style="margin-top:14px"><thead><tr><th>Customer / Project</th><th>Value</th><th>Status</th><th>Next action</th><th>Last contact</th></tr></thead><tbody>
+{% for o in opps %}
+<tr onclick="location.href='/opportunity/{{o.id}}'" style="cursor:pointer">
+<td><b>{{o.customer_name}}</b><div class="small">{{o.project}}{% if o.location %} · {{o.location}}{% endif %}</div></td>
+<td><b>{{money(o.quote_value)}}</b></td>
+<td><span class="pill {% if o.status=='Needs you' %}red{% elif o.status in ['Ready to send','Accepted'] %}green{% elif o.status in ['Considering','Awaiting quote'] %}amber{% else %}blue{% endif %}">{{o.status}}</span></td>
+<td>{{o.next_action or ''}}</td><td>{{o.last_contact or ''}}</td>
+</tr>{% endfor %}
+</tbody></table></div>
+{% endblock %}
