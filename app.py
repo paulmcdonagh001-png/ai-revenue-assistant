@@ -773,7 +773,7 @@ def ingest_email(sender, subject, body, project="Email enquiry", quote_value=0, 
             """UPDATE opportunities
                SET status=?, objection=?, next_action=?, last_contact=?,
                    quote_value=CASE WHEN ? > 0 THEN ? ELSE quote_value END,
-                   project=CASE WHEN project='Email enquiry' OR project LIKE '[ARA TEST]%' THEN ? ELSE project END,
+                   project=CASE WHEN project='Email enquiry' OR project LIKE '[ARA TEST]%%' THEN ? ELSE project END,
                    ai_summary=?, customer_intent=?, confidence=?, human_required=?, analysis_source=?
                WHERE id=?""",
             (
