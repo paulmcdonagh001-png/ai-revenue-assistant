@@ -1,15 +1,15 @@
 {% extends "layout.html" %}{% block content %}
 <h1>Good morning, Paul</h1>
-<div class="sub">Here is what needs your attention first. Nothing is sent automatically.</div>
+<div class="sub">Only work that genuinely needs you appears in Morning priorities.</div>
 <div class="cards">
 <div class="card"><div class="label">Open pipeline</div><div class="value">{{ money(metrics.open) }}</div></div>
 <div class="card"><div class="label">Requires attention</div><div class="value">{{ money(metrics.needs) }}</div><span class="pill red">Owner action</span></div>
 <div class="card"><div class="label">Open owner actions</div><div class="value">{{ metrics.open_actions }}</div><span class="pill amber">To review</span></div>
-<div class="card"><div class="label">Accepted</div><div class="value">{{ money(metrics.accepted) }}</div><span class="pill green">Won</span></div>
+<div class="card"><div class="label">Awaiting customer</div><div class="value">{{ money(metrics.awaiting) }}</div><span class="pill blue">No action now</span></div>
 </div>
 
 <div class="card" style="margin-bottom:18px">
-<div style="display:flex;justify-content:space-between;align-items:center;gap:16px"><div><h2 style="margin:0">Morning priorities</h2><div class="sub">Highest-attention opportunities, with the reason and next job to do.</div></div><a class="btn" href="/gmail">Sync Gmail</a></div>
+<div style="display:flex;justify-content:space-between;align-items:center;gap:16px"><div><h2 style="margin:0">Morning priorities</h2><div class="sub">Current jobs requiring your decision, approval or reply. Waiting jobs stay out of the way.</div></div><a class="btn" href="/gmail">Sync Gmail</a></div>
 <div style="margin-top:14px">
 {% for p in priorities %}
 <a href="/opportunity/{{p.opp.id}}" class="priority-row">
@@ -26,7 +26,7 @@
 <tr onclick="location.href='/opportunity/{{o.id}}'" style="cursor:pointer">
 <td><b>{{o.customer_name}}</b><div class="small">{{o.project}}{% if o.location %} · {{o.location}}{% endif %}</div></td>
 <td><b>{{money(o.quote_value)}}</b></td>
-<td><span class="pill {% if o.status=='Needs you' %}red{% elif o.status in ['Ready to send','Accepted'] %}green{% elif o.status in ['Considering','Awaiting quote'] %}amber{% else %}blue{% endif %}">{{o.status}}</span></td>
+<td><span class="pill {% if o.status=='Needs you' %}red{% elif o.status in ['Ready to send','Accepted'] %}green{% elif o.status in ['Considering','Awaiting quote'] %}amber{% elif o.status=='Awaiting customer' %}blue{% else %}blue{% endif %}">{{o.status}}</span></td>
 <td>{{o.next_action or ''}}</td><td>{{o.last_contact or ''}}</td>
 </tr>{% endfor %}
 </tbody></table></div>
