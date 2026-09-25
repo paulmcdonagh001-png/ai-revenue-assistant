@@ -1,6 +1,6 @@
 {% extends "layout.html" %}{% block content %}
 <h1>Good morning, Paul</h1>
-<div class="sub">Only work that genuinely needs you appears in Morning priorities.</div>
+<div class="sub">Only work that genuinely needs you appears in Morning priorities. <span class="pill green">Auto inbox check · every 5 min</span></div>
 <div class="cards">
 <div class="card"><div class="label">Open pipeline</div><div class="value">{{ money(metrics.open) }}</div></div>
 <div class="card"><div class="label">Requires attention</div><div class="value">{{ money(metrics.needs) }}</div><span class="pill red">Owner action</span></div>
@@ -9,7 +9,7 @@
 </div>
 
 <div class="card" style="margin-bottom:18px">
-<div style="display:flex;justify-content:space-between;align-items:center;gap:16px"><div><h2 style="margin:0">Morning priorities</h2><div class="sub">Current jobs requiring your decision, approval or reply. Waiting jobs stay out of the way.</div></div><a class="btn" href="/gmail">Sync Gmail</a></div>
+<div style="display:flex;justify-content:space-between;align-items:center;gap:16px"><div><h2 style="margin:0">Morning priorities</h2><div class="sub">Current jobs requiring your decision, approval or reply. Waiting jobs stay out of the way.</div></div><a class="btn" href="/gmail">Inbox settings</a></div>
 <div style="margin-top:14px">
 {% for p in priorities %}
 <a href="/opportunity/{{p.opp.id}}" class="priority-row">
