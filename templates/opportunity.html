@@ -1,0 +1,16 @@
+{% extends "layout.html" %}{% block content %}
+<a class="btn" href="/">← Back</a>
+<div class="grid2" style="margin-top:16px">
+<div class="card"><div style="display:flex;justify-content:space-between;gap:15px"><div><h1 style="font-size:27px">{{opp.customer_name}}</h1><div class="sub">{{opp.project}}{% if opp.location %} · {{opp.location}}{% endif %}</div></div><div class="value">{{money(opp.quote_value)}}</div></div>
+<p><span class="pill {% if opp.status=='Needs you' %}red{% elif opp.status in ['Ready to send','Accepted'] %}green{% else %}amber{% endif %}">{{opp.status}}</span>
+{% if opp.objection %}<span class="pill amber">{{opp.objection}}</span>{% endif %}</p>
+<h2>Activity</h2><div class="timeline">
+<div class="event"><b>Opportunity record</b><div class="small">Last contact: {{opp.last_contact or 'Unknown'}}</div></div>
+{% for x in interactions %}
+<div class="event"><b>{{x.classification or 'Email'}}</b><div class="small">{{x.created_at}} · {{x.channel}}</div><p>{{x.body}}</p></div>
+{% else %}<div class="small">No ingested interactions yet. Use Test Inbox to add one.</div>{% endfor %}
+</div></div>
+<div class="card"><h2>AI recommendation</h2><div class="notice"><b>{{opp.next_action or 'Monitor'}}</b><div class="small" style="margin-top:6px">This recommendation is based on the latest classified customer activity in the database.</div></div>
+{% if opp.objection %}<p><b>Why it needs a human:</b> {{opp.objection}}. V1 deliberately does not negotiate prices or commit to dates automatically.</p>{% endif %}
+</div></div>
+{% endblock %}
