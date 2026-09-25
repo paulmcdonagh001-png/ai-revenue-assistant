@@ -354,7 +354,7 @@ def gmail_sync():
     service, connected_email = gmail_service()
     if not service:
         return redirect(url_for("gmail_page", message="Connect Gmail first."))
-    response = service.users().messages().list(userId="me", q="in:inbox newer_than:14d", maxResults=25).execute()
+    response = service.users().messages().list(userId="me", q='in:inbox newer_than:14d subject:"[ARA TEST]"', maxResults=25).execute()
     ids = [x["id"] for x in response.get("messages",[])]
     created = duplicates = skipped = 0
     for mid in reversed(ids):
