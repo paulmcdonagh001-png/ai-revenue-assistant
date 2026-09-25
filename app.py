@@ -96,31 +96,58 @@ def login_required(fn):
         return fn(*args, **kwargs)
     return wrapped
 
+def newest_message_text(body):
+    text = body or ""
+    # Gmail/plain-text replies commonly include quoted history after these markers.
+    markers = [
+        "\nOn ", "\r\nOn ", "\nFrom:", "\r\nFrom:",
+        "\n-----Original Message-----", "\r\n-----Original Message-----"
+    ]
+    cut = len(text)
+    for marker in markers:
+        pos = text.find(marker)
+        if pos != -1:
+            cut = min(cut, pos)
+    # Also remove common quoted lines beginning with >
+    fresh_lines = [line for line in text[:cut].splitlines() if not line.lstrip().startswith(">")]
+    return "\n".join(fresh_lines).strip()
+
 def classify_email(subject, body):
-    text = f"{subject} {body}".lower()
+    fresh = newest_message_text(body)
+    text = f"{subject} {fresh}".lower()
+
     classification = "General reply"
     status = "Considering"
     objection = None
     next_action = "Review customer reply"
 
-    if any(x in text for x in ["too expensive","more than expected","price","cheaper","discount","budget"]):
-        classification = "Price objection"
-        status = "Needs you"
-        objection = "Price objection"
-        next_action = "Respond to price concern"
-    elif any(x in text for x in ["go ahead","accept","yes please","happy to proceed","let's proceed"]):
+    accepted = any(x in text for x in ["go ahead","accept","yes please","happy to proceed","let's proceed","we'd like to go ahead","we would like to go ahead"])
+    scheduling = any(x in text for x in ["start date","when can you start","availability","before october","in october","start in october","when could you"])
+    lost = any(x in text for x in ["another company","gone elsewhere","not proceeding","decline","no longer interested"])
+    price = any(x in text for x in ["too expensive","more than expected","price","cheaper","discount","budget"])
+
+    if accepted:
         classification = "Accepted"
         status = "Accepted"
-        next_action = "Book start date"
-    elif any(x in text for x in ["another company","gone elsewhere","not proceeding","decline","no longer interested"]):
+        if scheduling:
+            next_action = "Confirm start date"
+            objection = "Scheduling question"
+        else:
+            next_action = "Book start date"
+    elif lost:
         classification = "Lost"
         status = "Lost"
         next_action = "Record reason lost"
-    elif any(x in text for x in ["start date","when can you start","availability","before october","when could you"]):
+    elif scheduling:
         classification = "Scheduling question"
         status = "Needs you"
         objection = "Scheduling question"
         next_action = "Confirm start date"
+    elif price:
+        classification = "Price objection"
+        status = "Needs you"
+        objection = "Price objection"
+        next_action = "Respond to price concern"
     elif any(x in text for x in ["quote","quotation","estimate"]) and any(x in text for x in ["received","thanks","thank you"]):
         classification = "Quote acknowledged"
         status = "Considering"
