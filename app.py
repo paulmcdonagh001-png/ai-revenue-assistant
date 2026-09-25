@@ -7,6 +7,7 @@ import sqlite3
 from datetime import datetime, timezone
 from functools import wraps
 from email.utils import parseaddr
+from email.message import EmailMessage
 
 from flask import Flask, render_template, request, jsonify, redirect, url_for, session
 
@@ -24,7 +25,9 @@ USE_POSTGRES = DATABASE_URL.startswith("postgres")
 BASE_URL = os.getenv("BASE_URL", "http://localhost:5000").rstrip("/")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
-GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+GMAIL_SCOPES = [GMAIL_READ_SCOPE, GMAIL_SEND_SCOPE]
 
 STATUS_VALUES = ["New enquiry", "Considering", "Needs you", "Ready to send", "Accepted", "Lost", "Dormant"]
 
@@ -129,6 +132,12 @@ def init_db():
             "ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS analysis_source TEXT",
             "ALTER TABLE interactions ADD COLUMN IF NOT EXISTS latest_text TEXT",
             "ALTER TABLE interactions ADD COLUMN IF NOT EXISTS analysis_json TEXT",
+            "ALTER TABLE processed_messages ADD COLUMN IF NOT EXISTS gmail_thread_id TEXT",
+            "ALTER TABLE processed_messages ADD COLUMN IF NOT EXISTS rfc_message_id TEXT",
+            "ALTER TABLE processed_messages ADD COLUMN IF NOT EXISTS subject TEXT",
+            "ALTER TABLE processed_messages ADD COLUMN IF NOT EXISTS internal_date TEXT",
+            "ALTER TABLE reply_drafts ADD COLUMN IF NOT EXISTS sent_at TEXT",
+            "ALTER TABLE reply_drafts ADD COLUMN IF NOT EXISTS sent_message_id TEXT",
             """
             CREATE TABLE IF NOT EXISTS reply_drafts(
                 id BIGSERIAL PRIMARY KEY,
@@ -227,7 +236,13 @@ def init_db():
                 FOREIGN KEY(opportunity_id) REFERENCES opportunities(id),
                 FOREIGN KEY(interaction_id) REFERENCES interactions(id)
             )
-            """
+            """,
+            "ALTER TABLE processed_messages ADD COLUMN gmail_thread_id TEXT",
+            "ALTER TABLE processed_messages ADD COLUMN rfc_message_id TEXT",
+            "ALTER TABLE processed_messages ADD COLUMN subject TEXT",
+            "ALTER TABLE processed_messages ADD COLUMN internal_date TEXT",
+            "ALTER TABLE reply_drafts ADD COLUMN sent_at TEXT",
+            "ALTER TABLE reply_drafts ADD COLUMN sent_message_id TEXT"
         ]
     for statement in statements:
         try:
@@ -975,7 +990,7 @@ def gmail_service():
         return None, None
 
     info = json.loads(row["token_json"])
-    creds = Credentials.from_authorized_user_info(info, GMAIL_SCOPES)
+    creds = Credentials.from_authorized_user_info(info)
 
     if creds.expired and creds.refresh_token:
         creds.refresh(GoogleRequest())
@@ -988,6 +1003,79 @@ def gmail_service():
         c.close()
 
     return build("gmail","v1",credentials=creds,cache_discovery=False), row["email"]
+
+def gmail_send_authorized():
+    c = conn()
+    row = c.execute("SELECT token_json FROM gmail_connection WHERE id=1").fetchone()
+    c.close()
+    if not row or not row["token_json"]:
+        return False
+    try:
+        info = json.loads(row["token_json"])
+        scopes = info.get("scopes") or []
+        if isinstance(scopes, str):
+            scopes = scopes.split()
+        return GMAIL_SEND_SCOPE in scopes
+    except Exception:
+        return False
+
+
+def latest_gmail_thread(opportunity_id):
+    c = conn()
+    row = c.execute(
+        """SELECT gmail_thread_id, rfc_message_id, subject, gmail_id
+           FROM processed_messages
+           WHERE opportunity_id=?
+           ORDER BY CASE WHEN internal_date IS NULL THEN 1 ELSE 0 END,
+                    internal_date DESC, processed_at DESC
+           LIMIT 1""",
+        (opportunity_id,)
+    ).fetchone()
+    c.close()
+    return row
+
+
+def send_approved_gmail_reply(draft, opp):
+    if not gmail_send_authorized():
+        return None, "Gmail needs to be reconnected once to grant send permission."
+
+    subject = (draft["subject"] or opp["project"] or "Your enquiry").strip()
+    if "[ARA TEST]" not in subject:
+        return None, "V1 safety block: sending is only enabled for [ARA TEST] conversations."
+
+    recipient = (opp["customer_email"] or "").strip()
+    if not recipient:
+        return None, "This opportunity has no customer email address."
+
+    service, connected_email = gmail_service()
+    if not service or not connected_email:
+        return None, "Gmail is not connected."
+
+    thread = latest_gmail_thread(opp["id"])
+    out_subject = subject if subject.lower().startswith("re:") else f"Re: {subject}"
+
+    message = EmailMessage()
+    message["To"] = recipient
+    message["From"] = connected_email
+    message["Subject"] = out_subject
+    if thread and thread["rfc_message_id"]:
+        message["In-Reply-To"] = thread["rfc_message_id"]
+        message["References"] = thread["rfc_message_id"]
+    message.set_content(draft["body"])
+
+    payload = {
+        "raw": base64.urlsafe_b64encode(message.as_bytes()).decode("ascii")
+    }
+    if thread and thread["gmail_thread_id"]:
+        payload["threadId"] = thread["gmail_thread_id"]
+
+    try:
+        sent = service.users().messages().send(userId="me", body=payload).execute()
+        return sent, None
+    except Exception as exc:
+        app.logger.error("Gmail send failed: %s", type(exc).__name__)
+        return None, "Gmail could not send the approved reply."
+
 
 def decode_part(data):
     if not data:
@@ -1076,6 +1164,7 @@ def opportunity(oid):
         draft_placeholders=extract_draft_placeholders(draft["body"]) if draft else [],
         latest_analysis=latest_analysis,
         money=money,
+        gmail_send_ready=gmail_send_authorized(),
         message=request.args.get("message")
     )
 
@@ -1215,6 +1304,73 @@ def approve_draft(draft_id):
     ))
 
 
+@app.route("/draft/<int:draft_id>/send", methods=["POST"])
+@login_required
+def send_draft(draft_id):
+    c = conn()
+    draft = c.execute("SELECT * FROM reply_drafts WHERE id=?", (draft_id,)).fetchone()
+    if not draft:
+        c.close()
+        return "Not found", 404
+    opp = c.execute("SELECT * FROM opportunities WHERE id=?", (draft["opportunity_id"],)).fetchone()
+    c.close()
+    if not opp:
+        return "Not found", 404
+
+    if draft["status"] == "sent":
+        return redirect(url_for(
+            "opportunity", oid=opp["id"],
+            message="This reply has already been sent. It was not sent again."
+        ))
+    if draft["status"] != "approved":
+        return redirect(url_for(
+            "opportunity", oid=opp["id"],
+            message="Approve the reply before sending it."
+        ))
+    if extract_draft_placeholders(draft["body"]):
+        return redirect(url_for(
+            "opportunity", oid=opp["id"],
+            message="The reply still contains missing business facts and cannot be sent."
+        ))
+
+    sent, error = send_approved_gmail_reply(draft, opp)
+    if error:
+        return redirect(url_for("opportunity", oid=opp["id"], message=error))
+
+    now = utcnow()
+    c = conn()
+    c.execute(
+        """UPDATE reply_drafts
+           SET status='sent', sent_at=?, sent_message_id=?, updated_at=?
+           WHERE id=?""",
+        (now, sent.get("id",""), now, draft_id)
+    )
+    c.execute(
+        """INSERT INTO interactions
+           (opportunity_id,direction,channel,subject,body,classification,created_at,latest_text,analysis_json)
+           VALUES(?,?,?,?,?,?,?,?,?)""",
+        (
+            opp["id"], "outbound", "email",
+            draft["subject"] or opp["project"], draft["body"],
+            "Approved reply sent", now, draft["body"], None
+        )
+    )
+    c.execute(
+        "UPDATE action_items SET status='completed' WHERE opportunity_id=? AND owner='business' AND status='open'",
+        (opp["id"],)
+    )
+    c.execute(
+        "UPDATE opportunities SET next_action='Await customer reply', last_contact=? WHERE id=?",
+        (now[:10], opp["id"])
+    )
+    c.commit()
+    c.close()
+    return redirect(url_for(
+        "opportunity", oid=opp["id"],
+        message=f"Sent to {opp['customer_email']}. The send has been recorded in the activity log."
+    ))
+
+
 @app.route("/draft/<int:draft_id>/save", methods=["POST"])
 @login_required
 def save_draft(draft_id):
@@ -1256,7 +1412,8 @@ def analyst_lab():
         body=body,
         quote_value=quote_value,
         ai_ready=openai_configured(),
-        model=OPENAI_MODEL
+        model=OPENAI_MODEL,
+        send_ready=gmail_send_authorized()
     )
 
 @app.route("/test-inbox", methods=["GET","POST"])
@@ -1358,27 +1515,37 @@ def sync_test_gmail_messages():
     created = duplicates = skipped = 0
 
     for mid in reversed(ids):
-        c = conn()
-        already = c.execute(
-            "SELECT gmail_id FROM processed_messages WHERE gmail_id=?",
-            (mid,)
-        ).fetchone()
-        c.close()
-
-        if already:
-            duplicates += 1
-            continue
-
         msg = service.users().messages().get(userId="me", id=mid, format="full").execute()
         payload = msg.get("payload",{})
         headers = {h.get("name","").lower(): h.get("value","") for h in payload.get("headers",[])}
         display_name, sender = parseaddr(headers.get("from",""))
+        subject = headers.get("subject","(no subject)")
+        rfc_message_id = headers.get("message-id","")
+        gmail_thread_id = msg.get("threadId","")
+        internal_date = msg.get("internalDate","")
+
+        c = conn()
+        already = c.execute(
+            "SELECT gmail_id, opportunity_id FROM processed_messages WHERE gmail_id=?",
+            (mid,)
+        ).fetchone()
+        if already:
+            c.execute(
+                """UPDATE processed_messages
+                   SET gmail_thread_id=?, rfc_message_id=?, subject=?, internal_date=?
+                   WHERE gmail_id=?""",
+                (gmail_thread_id, rfc_message_id, subject, internal_date, mid)
+            )
+            c.commit()
+            c.close()
+            duplicates += 1
+            continue
+        c.close()
 
         if not sender or sender.lower() == (connected_email or "").lower():
             skipped += 1
             continue
 
-        subject = headers.get("subject","(no subject)")
         body = gmail_body(payload) or msg.get("snippet","")
         quote_value = extract_quote_value(subject + " " + body)
         project = clean_test_subject(subject)[:120]
@@ -1394,6 +1561,16 @@ def sync_test_gmail_messages():
         )
         if state == "created":
             created += 1
+            oid = result["opportunity_id"]
+            c = conn()
+            c.execute(
+                """UPDATE processed_messages
+                   SET gmail_thread_id=?, rfc_message_id=?, subject=?, internal_date=?
+                   WHERE gmail_id=?""",
+                (gmail_thread_id, rfc_message_id, subject, internal_date, mid)
+            )
+            c.commit()
+            c.close()
 
     return {"created": created, "duplicates": duplicates, "skipped": skipped, "error": None}
 
