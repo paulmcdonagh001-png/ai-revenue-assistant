@@ -943,13 +943,13 @@ def reconcile_current_work_state():
                        WHERE id=?""",
                     (False, oid)
                 )
-            c.execute(
-                """UPDATE action_items
-                   SET status='completed'
-                   WHERE opportunity_id=? AND owner='business' AND status='open'""",
-                (oid,)
-            )
-            waiting += 1
+                c.execute(
+                    """UPDATE action_items
+                       SET status='completed'
+                       WHERE opportunity_id=? AND owner='business' AND status='open'""",
+                    (oid,)
+                )
+                waiting += 1
 
     c.commit()
     c.close()
