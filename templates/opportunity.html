@@ -25,7 +25,8 @@
 
 {% if draft %}
 <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px">
-{% if draft.status=='approved' %}<span class="pill green">Approved · not sent</span>
+{% if draft.status=='sent' %}<span class="pill green">Sent</span>
+{% elif draft.status=='approved' %}<span class="pill green">Approved · ready to send</span>
 {% elif draft.status=='ready_for_review' %}<span class="pill green">Ready for approval</span>
 {% elif draft_placeholders %}<span class="pill amber">{{draft_placeholders|length}} business answer{% if draft_placeholders|length != 1 %}s{% endif %} needed</span>
 {% else %}<span class="pill blue">Draft</span>{% endif %}
@@ -50,11 +51,24 @@
 <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><button class="btn" type="submit">Save edits</button><span class="small">Still not sent</span></div>
 </form>
 
-{% if not draft_placeholders and draft.status!='approved' %}
+{% if not draft_placeholders and draft.status not in ['approved','sent'] %}
 <form method="post" action="/draft/{{draft.id}}/approve" style="margin-top:12px">
 <button class="btn primary" type="submit">Approve reply</button>
 <span class="small" style="margin-left:8px">Approval records your decision; it does not send the email.</span>
 </form>
+{% endif %}
+
+{% if draft.status=='approved' %}
+{% if gmail_send_ready %}
+<form method="post" action="/draft/{{draft.id}}/send" style="margin-top:14px" onsubmit="return confirm('Send this approved TEST reply to {{opp.customer_email}} now?');">
+<button class="btn primary" type="submit">Send approved test reply</button>
+<span class="small" style="margin-left:8px">One click sends it through the connected Gmail account.</span>
+</form>
+{% else %}
+<div class="notice" style="margin-top:14px"><b>One permission step remains</b><div class="small" style="margin-top:5px">Reconnect Gmail once to grant send permission. The app will still never send without your explicit click.</div><a class="btn primary" href="/gmail/connect" style="margin-top:10px">Reconnect Gmail for sending</a></div>
+{% endif %}
+{% elif draft.status=='sent' %}
+<div class="notice" style="margin-top:14px"><b>Reply sent</b><div class="small" style="margin-top:5px">{{draft.sent_at}} · message recorded in the activity log. This draft cannot be sent twice.</div></div>
 {% endif %}
 {% else %}
 <div class="sub" style="margin-top:14px">Generate a draft after reviewing the customer questions. If the assistant needs a price, date or scope decision, it will ask you here instead of guessing.</div>
