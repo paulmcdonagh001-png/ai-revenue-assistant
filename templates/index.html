@@ -1,6 +1,6 @@
 {% extends "layout.html" %}{% block content %}
 <h1>Good morning, Paul</h1>
-<div class="sub">Only work that genuinely needs you appears in Morning priorities. <span class="pill green">Auto inbox check · every 5 min</span></div>
+<div class="sub">Only work that genuinely needs you appears in Morning priorities. <span class="pill green">Auto inbox · checks every 2 min while open</span></div>
 <div class="cards">
 <div class="card"><div class="label">Open pipeline</div><div class="value">{{ money(metrics.open) }}</div></div>
 <div class="card"><div class="label">Requires attention</div><div class="value">{{ money(metrics.needs) }}</div><span class="pill red">Owner action</span></div>
@@ -30,4 +30,22 @@
 <td>{{o.next_action or ''}}</td><td>{{o.last_contact or ''}}</td>
 </tr>{% endfor %}
 </tbody></table></div>
+<script>
+(function(){
+  const interval = 60000;
+  async function pulse(){
+    try {
+      const response = await fetch('/api/auto-sync-pulse', {method:'POST'});
+      if (!response.ok) return;
+      const data = await response.json();
+      if (data.created && data.created > 0) {
+        window.location.reload();
+      }
+    } catch (e) {
+      // Silent by design: the dashboard remains usable if a background check fails.
+    }
+  }
+  window.setInterval(pulse, interval);
+})();
+</script>
 {% endblock %}
