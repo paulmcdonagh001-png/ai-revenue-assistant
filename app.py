@@ -1343,16 +1343,14 @@ def gmail_disconnect():
     c.close()
     return redirect(url_for("gmail_page", message="Gmail disconnected."))
 
-@app.route("/gmail/sync", methods=["POST"])
-@login_required
-def gmail_sync():
+def sync_test_gmail_messages():
     service, connected_email = gmail_service()
     if not service:
-        return redirect(url_for("gmail_page", message="Connect Gmail first."))
+        return {"created": 0, "duplicates": 0, "skipped": 0, "error": "Connect Gmail first."}
 
     response = service.users().messages().list(
         userId="me",
-        q='in:inbox newer_than:14d subject:"[ARA TEST]"',
+        q='in:inbox newer_than:30d subject:"[ARA TEST]"',
         maxResults=25
     ).execute()
 
@@ -1397,9 +1395,34 @@ def gmail_sync():
         if state == "created":
             created += 1
 
+    return {"created": created, "duplicates": duplicates, "skipped": skipped, "error": None}
+
+
+def bootstrap_gmail_on_start():
+    if os.getenv("GMAIL_BOOTSTRAP_ON_START") != "1":
+        return
+    try:
+        result = sync_test_gmail_messages()
+        if result.get("error"):
+            app.logger.error("GMAIL_BOOTSTRAP_FAILED reason=%s", result["error"])
+        else:
+            app.logger.warning(
+                "GMAIL_BOOTSTRAP_OK created=%s duplicates=%s skipped=%s",
+                result["created"], result["duplicates"], result["skipped"]
+            )
+    except Exception as exc:
+        app.logger.error("GMAIL_BOOTSTRAP_FAILED type=%s", type(exc).__name__)
+
+
+@app.route("/gmail/sync", methods=["POST"])
+@login_required
+def gmail_sync():
+    result = sync_test_gmail_messages()
+    if result.get("error"):
+        return redirect(url_for("gmail_page", message=result["error"]))
     return redirect(url_for(
         "gmail_page",
-        message=f"Sync complete: {created} new messages ingested, {duplicates} already seen, {skipped} skipped."
+        message=f"Sync complete: {result['created']} new messages ingested, {result['duplicates']} already seen, {result['skipped']} skipped."
     ))
 
 @app.route("/api/opportunities")
@@ -1439,3 +1462,4 @@ if __name__ == "__main__":
 else:
     init_db()
     run_ai_self_test()
+    bootstrap_gmail_on_start()
