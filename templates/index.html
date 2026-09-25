@@ -1,6 +1,6 @@
 {% extends "layout.html" %}{% block content %}
 <h1>Good morning, Paul</h1>
-<div class="sub">Only work that genuinely needs you appears in Morning priorities. <span class="pill green">Auto inbox · checks every 2 min while open</span></div>
+<div class="sub">Only work that genuinely needs you appears in Morning priorities. <span class="pill green">24/7 inbox monitoring on</span> <a href="/business-settings" style="text-decoration:none"><span class="pill {% if business_brain_score >= 75 %}green{% elif business_brain_score >= 40 %}amber{% else %}blue{% endif %}">Business Brain {{business_brain_score}}%</span></a></div>
 <div class="cards">
 <div class="card"><div class="label">Open pipeline</div><div class="value">{{ money(metrics.open) }}</div></div>
 <div class="card"><div class="label">Requires attention</div><div class="value">{{ money(metrics.needs) }}</div><span class="pill red">Owner action</span></div>
@@ -13,7 +13,7 @@
 <div style="margin-top:14px">
 {% for p in priorities %}
 <a href="/opportunity/{{p.opp.id}}" class="priority-row">
-<div><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b>{{p.opp.customer_name}}</b><span class="pill {% if p.opp.status=='Needs you' %}red{% elif p.opp.status=='Accepted' %}green{% else %}amber{% endif %}">{{p.opp.status}}</span>{% if p.opp.confidence is not none %}<span class="pill blue">{{(p.opp.confidence*100)|round|int}}%</span>{% endif %}</div><div class="small" style="margin-top:5px">{{p.opp.project}} · {{money(p.opp.quote_value)}}</div><div style="margin-top:8px">{{p.opp.ai_summary or p.opp.next_action or 'Review opportunity'}}</div>{% if p.actions %}<div class="small" style="margin-top:6px"><b>Next:</b> {{p.actions[0].description}}{% if p.actions|length > 1 %} · +{{p.actions|length - 1}} more{% endif %}</div>{% endif %}</div>
+<div><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b>{{p.opp.customer_name}}</b><span class="pill {% if p.opp.status in ['Needs you','Follow-up due'] %}red{% elif p.opp.status=='Accepted' %}green{% else %}amber{% endif %}">{{p.opp.status}}</span>{% if p.opp.confidence is not none %}<span class="pill blue">{{(p.opp.confidence*100)|round|int}}%</span>{% endif %}</div><div class="small" style="margin-top:5px">{{p.opp.project}} · {{money(p.opp.quote_value)}}</div><div style="margin-top:8px">{{p.opp.ai_summary or p.opp.next_action or 'Review opportunity'}}</div>{% if p.actions %}<div class="small" style="margin-top:6px"><b>Next:</b> {{p.actions[0].description}}{% if p.actions|length > 1 %} · +{{p.actions|length - 1}} more{% endif %}</div>{% endif %}</div>
 <div style="text-align:right;min-width:140px">{% if p.draft and p.draft.status=='sent' %}<span class="pill green">Sent</span>{% elif p.draft and p.draft.status=='approved' %}<span class="pill green">Approved to send</span>{% elif p.draft and p.draft.status=='ready_for_review' %}<span class="pill green">Ready for approval</span>{% elif p.draft %}<span class="pill amber">Needs your facts</span>{% else %}<span class="pill blue">Open</span>{% endif %}<div class="small" style="margin-top:8px">{{p.opp.last_contact or ''}}</div></div>
 </a>
 {% else %}<div class="notice">Nothing needs attention yet.</div>{% endfor %}
@@ -26,7 +26,7 @@
 <tr onclick="location.href='/opportunity/{{o.id}}'" style="cursor:pointer">
 <td><b>{{o.customer_name}}</b><div class="small">{{o.project}}{% if o.location %} · {{o.location}}{% endif %}</div></td>
 <td><b>{{money(o.quote_value)}}</b></td>
-<td><span class="pill {% if o.status=='Needs you' %}red{% elif o.status in ['Ready to send','Accepted'] %}green{% elif o.status in ['Considering','Awaiting quote'] %}amber{% elif o.status=='Awaiting customer' %}blue{% else %}blue{% endif %}">{{o.status}}</span></td>
+<td><span class="pill {% if o.status in ['Needs you','Follow-up due'] %}red{% elif o.status in ['Ready to send','Accepted'] %}green{% elif o.status in ['Considering','Awaiting quote'] %}amber{% elif o.status=='Awaiting customer' %}blue{% else %}blue{% endif %}">{{o.status}}</span></td>
 <td>{{o.next_action or ''}}</td><td>{{o.last_contact or ''}}</td>
 </tr>{% endfor %}
 </tbody></table></div>
