@@ -1411,7 +1411,8 @@ def bootstrap_gmail_on_start():
                 result["created"], result["duplicates"], result["skipped"]
             )
     except Exception as exc:
-        app.logger.error("GMAIL_BOOTSTRAP_FAILED type=%s", type(exc).__name__)
+        safe_msg = str(exc).replace(os.getenv("DATABASE_URL",""), "[DATABASE_URL]")
+        app.logger.error("GMAIL_BOOTSTRAP_FAILED type=%s message=%s", type(exc).__name__, safe_msg[:500])
 
 
 @app.route("/gmail/sync", methods=["POST"])
