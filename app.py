@@ -621,15 +621,26 @@ def run_ai_self_test():
         app.logger.error("AI_SELF_TEST_FAILED type=MissingAPIKey")
         return
     try:
-        from openai import OpenAI
-        client = OpenAI()
-        response = client.responses.create(
-            model=OPENAI_MODEL,
-            input="Return exactly the word OK.",
-            max_output_tokens=16
+        sample = """Thanks again for coming round last week. We really like the design and we're keen to get it done. It is a bit more than we originally budgeted though. Would there be any saving if we left out the raised beds? Also, could you start around the middle of October, and does the quote include taking the old paving away? We need to check with our neighbour about access, but assuming that's okay we'd like to move forward."""
+        analysis = analyze_conversation(
+            None,
+            "Patio quotation",
+            sample,
+            "Patio quotation",
+            8450
         )
-        output = (response.output_text or "").strip()[:20]
-        app.logger.warning("AI_SELF_TEST_OK model=%s output=%s", OPENAI_MODEL, output)
+        app.logger.warning(
+            "AI_SELF_TEST_OK source=%s status=%s intent=%s confidence=%.2f questions=%s actions=%s dependencies=%s human_required=%s summary=%s",
+            analysis.get("analysis_source"),
+            analysis.get("opportunity_status"),
+            analysis.get("customer_intent"),
+            float(analysis.get("confidence", 0)),
+            len(analysis.get("questions", [])),
+            len(analysis.get("actions", [])),
+            len(analysis.get("dependencies", [])),
+            analysis.get("human_required"),
+            (analysis.get("summary") or "")[:220]
+        )
     except Exception as exc:
         status = getattr(exc, "status_code", None)
         code = None
