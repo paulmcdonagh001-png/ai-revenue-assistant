@@ -596,6 +596,80 @@ Rules:
         return None, "Could not generate draft"
 
 
+def extract_draft_placeholders(body):
+    placeholders = []
+    seen = set()
+    for raw in re.findall(r"\[([^\[\]\n]{2,120})\]", body or ""):
+        key = raw.strip()
+        normalised = key.lower()
+        if not key or normalised in seen:
+            continue
+        seen.add(normalised)
+        label = re.sub(r"^(confirm|provide|enter|add|insert)\s+", "", key, flags=re.I).strip()
+        if label:
+            label = label[0].upper() + label[1:]
+        else:
+            label = key
+        placeholders.append({
+            "token": f"[{key}]",
+            "key": key,
+            "label": label
+        })
+    return placeholders
+
+
+def finalize_reply_draft(opp, draft_body, answers):
+    if not draft_body:
+        return None, "Draft is empty"
+
+    completed = draft_body
+    for token, answer in answers.items():
+        completed = completed.replace(token, answer.strip())
+
+    # A deterministic replacement is always available, so the owner never loses
+    # their answers if the AI rewrite is temporarily unavailable.
+    if not openai_configured():
+        return completed, None
+
+    context = {
+        "customer_name": opp["customer_name"] if opp else "",
+        "project": opp["project"] if opp else "",
+        "current_draft": draft_body,
+        "business_answers": answers
+    }
+    prompt = """Rewrite the draft into a polished final customer reply for a UK trades/home-improvement business.
+
+Rules:
+- Replace every square-bracket placeholder using only the matching business answer supplied.
+- The supplied business answers are authoritative. Preserve all numbers, dates, prices and scope facts exactly in meaning.
+- Fit terse owner answers naturally into complete sentences.
+- Do not invent any new price, discount, date, availability, scope item, technical fact, guarantee or promise.
+- Keep the useful content and answer every customer question already covered by the draft.
+- Do not mention AI, internal workflow, placeholders or these instructions.
+- Warm, concise, straightforward British English.
+- Output only the finished email body.
+- Do not leave any square-bracket placeholders in the result.
+"""
+    try:
+        from openai import OpenAI
+        client = OpenAI()
+        response = client.responses.create(
+            model=OPENAI_MODEL,
+            input=[
+                {"role":"system","content":prompt},
+                {"role":"user","content":json.dumps(context, ensure_ascii=False)}
+            ],
+            max_output_tokens=700
+        )
+        final_body = (response.output_text or "").strip()
+        if final_body and not extract_draft_placeholders(final_body):
+            return final_body, None
+        return completed, None
+    except Exception as exc:
+        app.logger.error("Reply finalisation failed: %s", type(exc).__name__)
+        return completed, None
+
+
 def get_morning_priorities(limit=6):
     c = conn()
     rows = c.execute(
@@ -828,6 +902,30 @@ def run_ai_self_test():
                 ("[" in body and "]" in body),
                 body[:450].replace("\n"," ")
             )
+
+            placeholders = extract_draft_placeholders(body)
+            test_answers = {}
+            for item in placeholders:
+                label = item["label"].lower()
+                if "price" in label or "saving" in label or "cost" in label:
+                    answer = "The revised price would be £7,950."
+                elif "october" in label or "start" in label or "availability" in label:
+                    answer = "We can start on 15 October."
+                elif "paving" in label or "removal" in label or "include" in label:
+                    answer = "Yes, removal of the old paving is included."
+                else:
+                    answer = "Confirmed by the business owner."
+                test_answers[item["token"]] = answer
+            final_body, final_error = finalize_reply_draft(fake_opp, body, test_answers)
+            if final_error or not final_body:
+                app.logger.error("AI_SELF_TEST_FINAL_FAILED error=%s", final_error or "empty")
+            else:
+                app.logger.warning(
+                    "AI_SELF_TEST_FINAL_OK chars=%s unresolved=%s preview=%s",
+                    len(final_body),
+                    len(extract_draft_placeholders(final_body)),
+                    final_body[:500].replace("\n"," ")
+                )
     except Exception as exc:
         status = getattr(exc, "status_code", None)
         code = None
@@ -975,6 +1073,7 @@ def opportunity(oid):
         interactions=interactions,
         actions=actions,
         draft=draft,
+        draft_placeholders=extract_draft_placeholders(draft["body"]) if draft else [],
         latest_analysis=latest_analysis,
         money=money,
         message=request.args.get("message")
@@ -1009,6 +1108,7 @@ def draft_reply(oid):
         return redirect(url_for("opportunity", oid=oid, message=error))
 
     now = utcnow()
+    generated_status = "draft" if extract_draft_placeholders(generated["body"]) else "ready_for_review"
     c = conn()
     c.execute(
         """INSERT INTO reply_drafts
@@ -1016,12 +1116,103 @@ def draft_reply(oid):
            VALUES(?,?,?,?,?,?,?,?)""",
         (
             oid, generated["interaction_id"], generated["subject"], generated["body"],
-            "draft", generated["model"], now, now
+            generated_status, generated["model"], now, now
         )
     )
     c.commit()
     c.close()
     return redirect(url_for("opportunity", oid=oid, message="Reply draft generated. Review it before sending."))
+
+
+@app.route("/draft/<int:draft_id>/complete", methods=["POST"])
+@login_required
+def complete_draft(draft_id):
+    c = conn()
+    draft = c.execute("SELECT * FROM reply_drafts WHERE id=?", (draft_id,)).fetchone()
+    if not draft:
+        c.close()
+        return "Not found", 404
+    opp = c.execute("SELECT * FROM opportunities WHERE id=?", (draft["opportunity_id"],)).fetchone()
+    c.close()
+    if not opp:
+        return "Not found", 404
+
+    placeholders = extract_draft_placeholders(draft["body"])
+    if not placeholders:
+        return redirect(url_for(
+            "opportunity",
+            oid=draft["opportunity_id"],
+            message="This reply already has all the business facts. It is ready for approval."
+        ))
+
+    answers = {}
+    missing = []
+    for idx, item in enumerate(placeholders):
+        answer = request.form.get(f"answer_{idx}", "").strip()
+        if not answer:
+            missing.append(item["label"])
+        else:
+            answers[item["token"]] = answer
+
+    if missing:
+        return redirect(url_for(
+            "opportunity",
+            oid=draft["opportunity_id"],
+            message=f"Fill in all {len(placeholders)} business answers before completing the reply."
+        ))
+
+    final_body, error = finalize_reply_draft(opp, draft["body"], answers)
+    if error or not final_body:
+        return redirect(url_for(
+            "opportunity",
+            oid=draft["opportunity_id"],
+            message=error or "Could not complete the reply."
+        ))
+
+    c = conn()
+    c.execute(
+        "UPDATE reply_drafts SET body=?, status='ready_for_review', updated_at=? WHERE id=?",
+        (final_body, utcnow(), draft_id)
+    )
+    c.commit()
+    c.close()
+    return redirect(url_for(
+        "opportunity",
+        oid=draft["opportunity_id"],
+        message="Finished reply created. Review it, then approve when you are happy."
+    ))
+
+
+@app.route("/draft/<int:draft_id>/approve", methods=["POST"])
+@login_required
+def approve_draft(draft_id):
+    c = conn()
+    draft = c.execute("SELECT * FROM reply_drafts WHERE id=?", (draft_id,)).fetchone()
+    if not draft:
+        c.close()
+        return "Not found", 404
+    if extract_draft_placeholders(draft["body"]):
+        c.close()
+        return redirect(url_for(
+            "opportunity",
+            oid=draft["opportunity_id"],
+            message="Complete the missing business facts before approving this reply."
+        ))
+    c.execute(
+        "UPDATE reply_drafts SET status='approved', updated_at=? WHERE id=?",
+        (utcnow(), draft_id)
+    )
+    c.execute(
+        "UPDATE opportunities SET next_action='Approved reply ready to send' WHERE id=?",
+        (draft["opportunity_id"],)
+    )
+    c.commit()
+    c.close()
+    return redirect(url_for(
+        "opportunity",
+        oid=draft["opportunity_id"],
+        message="Reply approved. It has not been sent."
+    ))
 
 
 @app.route("/draft/<int:draft_id>/save", methods=["POST"])
@@ -1033,9 +1224,15 @@ def save_draft(draft_id):
     if not row:
         c.close()
         return "Not found", 404
+    if extract_draft_placeholders(body):
+        new_status = "draft"
+    elif row["status"] == "approved":
+        new_status = "ready_for_review"
+    else:
+        new_status = row["status"] if row["status"] == "ready_for_review" else "ready_for_review"
     c.execute(
-        "UPDATE reply_drafts SET body=?, updated_at=? WHERE id=?",
-        (body, utcnow(), draft_id)
+        "UPDATE reply_drafts SET body=?, status=?, updated_at=? WHERE id=?",
+        (body, new_status, utcnow(), draft_id)
     )
     c.commit()
     c.close()
