@@ -1,16 +1,39 @@
 {% extends "layout.html" %}{% block content %}
 <a class="btn" href="/">← Back</a>
 <div class="grid2" style="margin-top:16px">
-<div class="card"><div style="display:flex;justify-content:space-between;gap:15px"><div><h1 style="font-size:27px">{{opp.customer_name}}</h1><div class="sub">{{opp.project}}{% if opp.location %} · {{opp.location}}{% endif %}</div></div><div class="value">{{money(opp.quote_value)}}</div></div>
+<div class="card">
+<div style="display:flex;justify-content:space-between;gap:15px"><div><h1 style="font-size:27px">{{opp.customer_name}}</h1><div class="sub">{{opp.project}}{% if opp.location %} · {{opp.location}}{% endif %}</div></div><div class="value">{{money(opp.quote_value)}}</div></div>
 <p><span class="pill {% if opp.status=='Needs you' %}red{% elif opp.status in ['Ready to send','Accepted'] %}green{% else %}amber{% endif %}">{{opp.status}}</span>
-{% if opp.objection %}<span class="pill amber">{{opp.objection}}</span>{% endif %}</p>
-<h2>Activity</h2><div class="timeline">
+{% if opp.objection %}<span class="pill amber">{{opp.objection}}</span>{% endif %}
+{% if opp.confidence is not none %}<span class="pill blue">{{(opp.confidence*100)|round|int}}% confidence</span>{% endif %}</p>
+{% if opp.ai_summary %}<div class="notice"><b>AI summary</b><div style="margin-top:6px">{{opp.ai_summary}}</div><div class="small" style="margin-top:6px">{{opp.analysis_source}}</div></div>{% endif %}
+<h2>Activity</h2><div class="timeline" style="margin-top:14px">
 <div class="event"><b>Opportunity record</b><div class="small">Last contact: {{opp.last_contact or 'Unknown'}}</div></div>
 {% for x in interactions %}
-<div class="event"><b>{{x.classification or 'Email'}}</b><div class="small">{{x.created_at}} · {{x.channel}}</div><p>{{x.body}}</p></div>
-{% else %}<div class="small">No ingested interactions yet. Use Test Inbox to add one.</div>{% endfor %}
+<div class="event"><b>{{x.classification or 'Email'}}</b><div class="small">{{x.created_at}} · {{x.channel}}</div><p>{{x.latest_text or x.body}}</p></div>
+{% else %}<div class="small">No interactions yet.</div>{% endfor %}
 </div></div>
-<div class="card"><h2>AI recommendation</h2><div class="notice"><b>{{opp.next_action or 'Monitor'}}</b><div class="small" style="margin-top:6px">This recommendation is based on the latest classified customer activity in the database.</div></div>
-{% if opp.objection %}<p><b>Why it needs a human:</b> {{opp.objection}}. V1 deliberately does not negotiate prices or commit to dates automatically.</p>{% endif %}
+<div>
+<div class="card"><h2>What needs doing</h2>
+{% for a in actions %}
+<div class="action"><b>{{a.description}}</b><div class="small">{{a.category}} · {{a.owner}} · {{a.priority}} priority · {{(a.confidence*100)|round|int}}%</div></div>
+{% else %}<div class="small">No open action items.</div>{% endfor %}
+</div>
+{% if latest_analysis %}
+<div class="card" style="margin-top:18px"><h2>Latest message analysis</h2>
+<p><b>Intent:</b> {{latest_analysis.customer_intent|replace('_',' ')|title}}</p>
+<p><b>Sentiment:</b> {{latest_analysis.sentiment|title}}</p>
+{% if latest_analysis.questions %}
+<h3>Questions detected</h3>
+{% for q in latest_analysis.questions %}
+<div class="question"><b>{{q.question}}</b><div class="small">{{q.category}} · {% if q.requires_human %}human answer needed{% else %}low-risk{% endif %} · {{(q.confidence*100)|round|int}}%</div></div>
+{% endfor %}
+{% endif %}
+{% if latest_analysis.dependencies %}
+<h3>Dependencies</h3>
+{% for d in latest_analysis.dependencies %}<div class="question">{{d.description}}<div class="small">Waiting on: {{d.owner|replace('_',' ')}}</div></div>{% endfor %}
+{% endif %}
+</div>
+{% endif %}
 </div></div>
 {% endblock %}
