@@ -128,7 +128,22 @@ def init_db():
             "ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS human_required BOOLEAN DEFAULT FALSE",
             "ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS analysis_source TEXT",
             "ALTER TABLE interactions ADD COLUMN IF NOT EXISTS latest_text TEXT",
-            "ALTER TABLE interactions ADD COLUMN IF NOT EXISTS analysis_json TEXT"
+            "ALTER TABLE interactions ADD COLUMN IF NOT EXISTS analysis_json TEXT",
+            """
+            CREATE TABLE IF NOT EXISTS reply_drafts(
+                id BIGSERIAL PRIMARY KEY,
+                opportunity_id BIGINT NOT NULL,
+                interaction_id BIGINT,
+                subject TEXT,
+                body TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'draft',
+                model TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(opportunity_id) REFERENCES opportunities(id),
+                FOREIGN KEY(interaction_id) REFERENCES interactions(id)
+            )
+            """
         ]
     else:
         statements = [
@@ -194,6 +209,21 @@ def init_db():
                 confidence REAL DEFAULT 0,
                 status TEXT NOT NULL DEFAULT 'open',
                 created_at TEXT NOT NULL,
+                FOREIGN KEY(opportunity_id) REFERENCES opportunities(id),
+                FOREIGN KEY(interaction_id) REFERENCES interactions(id)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS reply_drafts(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                opportunity_id INTEGER NOT NULL,
+                interaction_id INTEGER,
+                subject TEXT,
+                body TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'draft',
+                model TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
                 FOREIGN KEY(opportunity_id) REFERENCES opportunities(id),
                 FOREIGN KEY(interaction_id) REFERENCES interactions(id)
             )
@@ -488,6 +518,126 @@ Rules:
         fallback["summary"] = f"{fallback['summary']} (AI fallback)"
         return fallback
 
+def generate_reply_draft(opp, interactions, actions, latest_analysis):
+    if not openai_configured():
+        return None, "AI is not configured"
+
+    latest_message = ""
+    latest_subject = opp["project"] or "Your enquiry"
+    interaction_id = None
+    for item in interactions:
+        if item["direction"] == "inbound":
+            latest_message = item["latest_text"] or newest_message_text(item["body"])
+            latest_subject = item["subject"] or latest_subject
+            interaction_id = item["id"]
+            break
+
+    if not latest_message:
+        return None, "No inbound customer message found"
+
+    unresolved = [
+        {
+            "category": a["category"],
+            "description": a["description"],
+            "priority": a["priority"]
+        }
+        for a in actions if a["owner"] == "business" and a["status"] == "open"
+    ]
+
+    context = {
+        "customer_name": opp["customer_name"],
+        "project": opp["project"],
+        "quote_value_gbp": opp["quote_value"],
+        "status": opp["status"],
+        "summary": opp["ai_summary"] or "",
+        "customer_intent": opp["customer_intent"] or "",
+        "latest_customer_message": latest_message,
+        "analysis": latest_analysis or {},
+        "business_actions_still_unresolved": unresolved
+    }
+
+    prompt = """Draft a concise reply email for a UK trades/home-improvement business.
+The reply will be reviewed by the business owner before sending.
+
+Rules:
+- Reply naturally to every distinct customer question or concern you can safely address.
+- Never invent a price, discount, start date, availability, technical fact, scope inclusion, guarantee or promise.
+- When the business must supply missing information, insert a short square-bracket placeholder such as [confirm revised price], [confirm October availability], or [confirm whether removal is included].
+- Do not imply the job is booked unless the customer has clearly accepted.
+- If the customer is interested but conditional, acknowledge that accurately.
+- Do not mention AI, confidence scores, internal statuses or this instruction.
+- Warm, straightforward British English. Avoid salesy language.
+- Aim for 80-180 words unless the questions genuinely require more.
+- Output only the email body, with no subject line and no commentary.
+"""
+
+    try:
+        from openai import OpenAI
+        client = OpenAI()
+        response = client.responses.create(
+            model=OPENAI_MODEL,
+            input=[
+                {"role":"system","content":prompt},
+                {"role":"user","content":json.dumps(context, ensure_ascii=False)}
+            ],
+            max_output_tokens=700
+        )
+        draft = (response.output_text or "").strip()
+        if not draft:
+            return None, "AI returned an empty draft"
+        return {
+            "body": draft,
+            "subject": latest_subject,
+            "interaction_id": interaction_id,
+            "model": OPENAI_MODEL
+        }, None
+    except Exception as exc:
+        app.logger.error("Reply draft generation failed: %s", type(exc).__name__)
+        return None, "Could not generate draft"
+
+
+def get_morning_priorities(limit=6):
+    c = conn()
+    rows = c.execute(
+        """SELECT * FROM opportunities
+           WHERE status NOT IN ('Lost','Dormant')
+           ORDER BY
+             CASE status
+               WHEN 'Needs you' THEN 1
+               WHEN 'Accepted' THEN 2
+               WHEN 'New enquiry' THEN 3
+               WHEN 'Considering' THEN 4
+               WHEN 'Ready to send' THEN 5
+               ELSE 6
+             END,
+             human_required DESC,
+             quote_value DESC,
+             id DESC
+           LIMIT ?""",
+        (limit,)
+    ).fetchall()
+    priorities=[]
+    for row in rows:
+        actions=c.execute(
+            """SELECT * FROM action_items
+               WHERE opportunity_id=? AND status='open'
+               ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, id DESC
+               LIMIT 3""",
+            (row["id"],)
+        ).fetchall()
+        draft=c.execute(
+            "SELECT id, status FROM reply_drafts WHERE opportunity_id=? ORDER BY id DESC LIMIT 1",
+            (row["id"],)
+        ).fetchone()
+        priorities.append({
+            "opp": row,
+            "actions": actions,
+            "draft": draft
+        })
+    c.close()
+    return priorities
+
+
 def guess_name(email_addr, body=""):
     local = (email_addr or "customer").split("@")[0]
     candidate = re.sub(r"[._+-]+"," ",local).strip().title()
@@ -746,7 +896,13 @@ def dashboard():
     c = conn()
     opps = c.execute("SELECT * FROM opportunities ORDER BY quote_value DESC, id DESC").fetchall()
     c.close()
-    return render_template("index.html", opps=opps, metrics=get_metrics(), money=money)
+    return render_template(
+        "index.html",
+        opps=opps,
+        priorities=get_morning_priorities(),
+        metrics=get_metrics(),
+        money=money
+    )
 
 @app.route("/opportunity/<int:oid>")
 @login_required
@@ -761,6 +917,10 @@ def opportunity(oid):
         "SELECT * FROM action_items WHERE opportunity_id=? AND status='open' ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, id DESC",
         (oid,)
     ).fetchall()
+    draft = c.execute(
+        "SELECT * FROM reply_drafts WHERE opportunity_id=? ORDER BY id DESC LIMIT 1",
+        (oid,)
+    ).fetchone()
     c.close()
     if not opp:
         return "Not found", 404
@@ -777,9 +937,73 @@ def opportunity(oid):
         opp=opp,
         interactions=interactions,
         actions=actions,
+        draft=draft,
         latest_analysis=latest_analysis,
-        money=money
+        money=money,
+        message=request.args.get("message")
     )
+
+@app.route("/opportunity/<int:oid>/draft-reply", methods=["POST"])
+@login_required
+def draft_reply(oid):
+    c = conn()
+    opp = c.execute("SELECT * FROM opportunities WHERE id=?", (oid,)).fetchone()
+    interactions = c.execute(
+        "SELECT * FROM interactions WHERE opportunity_id=? ORDER BY created_at DESC",
+        (oid,)
+    ).fetchall()
+    actions = c.execute(
+        "SELECT * FROM action_items WHERE opportunity_id=? AND status='open' ORDER BY id DESC",
+        (oid,)
+    ).fetchall()
+    c.close()
+    if not opp:
+        return "Not found", 404
+
+    latest_analysis = None
+    if interactions and interactions[0]["analysis_json"]:
+        try:
+            latest_analysis = json.loads(interactions[0]["analysis_json"])
+        except Exception:
+            latest_analysis = None
+
+    generated, error = generate_reply_draft(opp, interactions, actions, latest_analysis)
+    if error:
+        return redirect(url_for("opportunity", oid=oid, message=error))
+
+    now = utcnow()
+    c = conn()
+    c.execute(
+        """INSERT INTO reply_drafts
+           (opportunity_id,interaction_id,subject,body,status,model,created_at,updated_at)
+           VALUES(?,?,?,?,?,?,?,?)""",
+        (
+            oid, generated["interaction_id"], generated["subject"], generated["body"],
+            "draft", generated["model"], now, now
+        )
+    )
+    c.commit()
+    c.close()
+    return redirect(url_for("opportunity", oid=oid, message="Reply draft generated. Review it before sending."))
+
+
+@app.route("/draft/<int:draft_id>/save", methods=["POST"])
+@login_required
+def save_draft(draft_id):
+    body = request.form.get("body", "").strip()
+    c = conn()
+    row = c.execute("SELECT * FROM reply_drafts WHERE id=?", (draft_id,)).fetchone()
+    if not row:
+        c.close()
+        return "Not found", 404
+    c.execute(
+        "UPDATE reply_drafts SET body=?, updated_at=? WHERE id=?",
+        (body, utcnow(), draft_id)
+    )
+    c.commit()
+    c.close()
+    return redirect(url_for("opportunity", oid=row["opportunity_id"], message="Draft saved."))
+
 
 @app.route("/analyst-lab", methods=["GET","POST"])
 @login_required
