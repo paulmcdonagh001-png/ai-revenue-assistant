@@ -7,7 +7,7 @@ import re
 import json
 import base64
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from functools import wraps
 from email.utils import parseaddr
 from email.message import EmailMessage
@@ -37,7 +37,7 @@ GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 GMAIL_SCOPES = [GMAIL_READ_SCOPE, GMAIL_SEND_SCOPE]
 
-STATUS_VALUES = ["New enquiry", "Considering", "Needs you", "Ready to send", "Accepted", "Awaiting customer", "Lost", "Dormant"]
+STATUS_VALUES = ["New enquiry", "Considering", "Needs you", "Ready to send", "Accepted", "Awaiting customer", "Follow-up due", "Lost", "Dormant"]
 
 def utcnow():
     return datetime.now(timezone.utc).isoformat()
@@ -146,6 +146,9 @@ def init_db():
             "ALTER TABLE processed_messages ADD COLUMN IF NOT EXISTS internal_date TEXT",
             "ALTER TABLE reply_drafts ADD COLUMN IF NOT EXISTS sent_at TEXT",
             "ALTER TABLE reply_drafts ADD COLUMN IF NOT EXISTS sent_message_id TEXT",
+            "ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS follow_up_due_at TEXT",
+            "ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS follow_up_count INTEGER DEFAULT 0",
+            "ALTER TABLE reply_drafts ADD COLUMN IF NOT EXISTS draft_type TEXT DEFAULT 'reply'",
             """
             CREATE TABLE IF NOT EXISTS reply_drafts(
                 id BIGSERIAL PRIMARY KEY,
@@ -250,7 +253,10 @@ def init_db():
             "ALTER TABLE processed_messages ADD COLUMN subject TEXT",
             "ALTER TABLE processed_messages ADD COLUMN internal_date TEXT",
             "ALTER TABLE reply_drafts ADD COLUMN sent_at TEXT",
-            "ALTER TABLE reply_drafts ADD COLUMN sent_message_id TEXT"
+            "ALTER TABLE reply_drafts ADD COLUMN sent_message_id TEXT",
+            "ALTER TABLE opportunities ADD COLUMN follow_up_due_at TEXT",
+            "ALTER TABLE opportunities ADD COLUMN follow_up_count INTEGER DEFAULT 0",
+            "ALTER TABLE reply_drafts ADD COLUMN draft_type TEXT DEFAULT 'reply'"
         ]
     for statement in statements:
         try:
@@ -619,6 +625,126 @@ Rules:
         return None, "Could not generate draft"
 
 
+def generate_followup_draft(opp, interactions):
+    if not openai_configured():
+        return None, "AI is not configured"
+
+    recent = []
+    for item in reversed(interactions[-8:]):
+        recent.append({
+            "direction": item["direction"],
+            "subject": item["subject"] or "",
+            "text": item["latest_text"] or newest_message_text(item["body"])
+        })
+
+    latest_subject = opp["project"] or "Your enquiry"
+    for item in interactions:
+        if item["subject"]:
+            latest_subject = item["subject"]
+            break
+
+    context = {
+        "customer_name": opp["customer_name"],
+        "project": opp["project"],
+        "quote_value_gbp": opp["quote_value"],
+        "summary": opp["ai_summary"] or "",
+        "conversation": recent
+    }
+
+    prompt = """Draft a short follow-up email for a UK trades/home-improvement business after the business has replied and the customer has not responded.
+
+Rules:
+- This is a gentle chase, not a new sales pitch.
+- Do not invent any new price, discount, date, availability, scope, guarantee or promise.
+- Do not repeat the whole quotation.
+- Acknowledge the existing conversation naturally.
+- Ask whether the customer would like to proceed or needs anything clarified.
+- Warm, straightforward British English.
+- Keep it around 45-90 words.
+- Output only the email body, no subject line and no commentary.
+"""
+    try:
+        from openai import OpenAI
+        client = OpenAI()
+        response = client.responses.create(
+            model=OPENAI_MODEL,
+            input=[
+                {"role":"system","content":prompt},
+                {"role":"user","content":json.dumps(context, ensure_ascii=False)}
+            ],
+            max_output_tokens=350
+        )
+        body = (response.output_text or "").strip()
+        if not body:
+            return None, "AI returned an empty follow-up"
+        return {
+            "body": body,
+            "subject": latest_subject,
+            "interaction_id": None,
+            "model": OPENAI_MODEL
+        }, None
+    except Exception as exc:
+        app.logger.error("Follow-up draft generation failed: %s", type(exc).__name__)
+        return None, "Could not generate follow-up draft"
+
+
+def refresh_followup_states():
+    """Bring genuinely stale waiting jobs back to the owner without auto-sending."""
+    now = datetime.now(timezone.utc)
+    c = conn()
+    rows = c.execute(
+        """SELECT id, follow_up_due_at
+           FROM opportunities
+           WHERE status='Awaiting customer'
+             AND follow_up_due_at IS NOT NULL
+             AND COALESCE(follow_up_count,0) < 1"""
+    ).fetchall()
+
+    due_count = 0
+    for row in rows:
+        try:
+            due_at = datetime.fromisoformat(row["follow_up_due_at"])
+            if due_at.tzinfo is None:
+                due_at = due_at.replace(tzinfo=timezone.utc)
+        except Exception:
+            continue
+        if due_at > now:
+            continue
+
+        oid = row["id"]
+        existing = c.execute(
+            """SELECT id FROM action_items
+               WHERE opportunity_id=? AND status='open' AND category='follow_up'
+               LIMIT 1""",
+            (oid,)
+        ).fetchone()
+        if not existing:
+            c.execute(
+                """INSERT INTO action_items
+                   (opportunity_id,interaction_id,category,description,owner,priority,confidence,status,created_at)
+                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                (
+                    oid, None, "follow_up", "Follow up with customer",
+                    "business", "medium", 1.0, "open", utcnow()
+                )
+            )
+        c.execute(
+            """UPDATE opportunities
+               SET status='Follow-up due',
+                   next_action='Follow up with customer',
+                   human_required=?
+               WHERE id=?""",
+            (True, oid)
+        )
+        due_count += 1
+
+    c.commit()
+    c.close()
+    if due_count:
+        app.logger.warning("FOLLOW_UPS_DUE count=%s", due_count)
+    return due_count
+
+
 def extract_draft_placeholders(body):
     placeholders = []
     seen = set()
@@ -700,8 +826,9 @@ def get_morning_priorities(limit=6):
            WHERE status NOT IN ('Lost','Dormant','Awaiting customer')
            ORDER BY
              CASE status
-               WHEN 'Needs you' THEN 1
-               WHEN 'Accepted' THEN 2
+               WHEN 'Follow-up due' THEN 1
+               WHEN 'Needs you' THEN 2
+               WHEN 'Accepted' THEN 3
                WHEN 'New enquiry' THEN 3
                WHEN 'Ready to send' THEN 4
                WHEN 'Considering' THEN 5
@@ -731,7 +858,7 @@ def get_morning_priorities(limit=6):
         draft_needs_action = bool(draft and draft["status"] in ("draft","ready_for_review","approved"))
         status_needs_action = bool(
             row["human_required"]
-            or row["status"] in ("Needs you","New enquiry","Ready to send","Accepted")
+            or row["status"] in ("Follow-up due","Needs you","New enquiry","Ready to send","Accepted")
         )
         if actions or draft_needs_action or status_needs_action:
             priorities.append({
@@ -803,14 +930,19 @@ def reconcile_current_work_state():
             or not latest_inbound["created_at"]
             or latest_inbound["created_at"] <= (latest_sent["sent_at"] or "")
         ):
-            c.execute(
-                """UPDATE opportunities
-                   SET status='Awaiting customer',
-                       next_action='Await customer reply',
-                       human_required=?
-                   WHERE id=?""",
-                (False, oid)
-            )
+            current = c.execute(
+                "SELECT status FROM opportunities WHERE id=?",
+                (oid,)
+            ).fetchone()
+            if current and current["status"] != "Follow-up due":
+                c.execute(
+                    """UPDATE opportunities
+                       SET status='Awaiting customer',
+                           next_action='Await customer reply',
+                           human_required=?
+                       WHERE id=?""",
+                    (False, oid)
+                )
             c.execute(
                 """UPDATE action_items
                    SET status='completed'
@@ -885,7 +1017,8 @@ def ingest_email(sender, subject, body, project="Email enquiry", quote_value=0, 
                SET status=?, objection=?, next_action=?, last_contact=?,
                    quote_value=CASE WHEN ? > 0 THEN ? ELSE quote_value END,
                    project=CASE WHEN project='Email enquiry' OR project LIKE '[ARA TEST]%%' THEN ? ELSE project END,
-                   ai_summary=?, customer_intent=?, confidence=?, human_required=?, analysis_source=?
+                   ai_summary=?, customer_intent=?, confidence=?, human_required=?, analysis_source=?,
+                   follow_up_due_at=NULL
                WHERE id=?""",
             (
                 status, objection, next_action, now[:10],
@@ -898,13 +1031,13 @@ def ingest_email(sender, subject, body, project="Email enquiry", quote_value=0, 
         cur = c.execute(
             """INSERT INTO opportunities
                (customer_name,customer_email,project,location,quote_value,status,objection,next_action,last_contact,created_at,
-                ai_summary,customer_intent,confidence,human_required,analysis_source)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ai_summary,customer_intent,confidence,human_required,analysis_source,follow_up_due_at,follow_up_count)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                RETURNING id""",
             (
                 name, sender, project, "", quote_value, status, objection, next_action, now[:10], now,
                 analysis["summary"], analysis["customer_intent"], float(analysis["confidence"]),
-                bool(analysis["human_required"]), analysis["analysis_source"]
+                bool(analysis["human_required"]), analysis["analysis_source"], None, 0
             )
         )
         oid = cur.fetchone()["id"]
@@ -1235,6 +1368,7 @@ def maybe_auto_sync(force=False):
 
     try:
         result = sync_test_gmail_messages()
+        refresh_followup_states()
         _last_auto_sync_monotonic = time.monotonic()
         _last_auto_sync_at = utcnow()
         return {
@@ -1277,6 +1411,7 @@ def logout():
 @login_required
 def dashboard():
     sync_state = maybe_auto_sync()
+    refresh_followup_states()
     c = conn()
     opps = c.execute("SELECT * FROM opportunities ORDER BY quote_value DESC, id DESC").fetchall()
     c.close()
@@ -1363,16 +1498,63 @@ def draft_reply(oid):
     c = conn()
     c.execute(
         """INSERT INTO reply_drafts
-           (opportunity_id,interaction_id,subject,body,status,model,created_at,updated_at)
-           VALUES(?,?,?,?,?,?,?,?)""",
+           (opportunity_id,interaction_id,subject,body,status,model,created_at,updated_at,draft_type)
+           VALUES(?,?,?,?,?,?,?,?,?)""",
         (
             oid, generated["interaction_id"], generated["subject"], generated["body"],
-            generated_status, generated["model"], now, now
+            generated_status, generated["model"], now, now, "reply"
         )
     )
     c.commit()
     c.close()
     return redirect(url_for("opportunity", oid=oid, message="Reply draft generated. Review it before sending."))
+
+
+@app.route("/opportunity/<int:oid>/follow-up-draft", methods=["POST"])
+@login_required
+def follow_up_draft(oid):
+    c = conn()
+    opp = c.execute("SELECT * FROM opportunities WHERE id=?", (oid,)).fetchone()
+    interactions = c.execute(
+        "SELECT * FROM interactions WHERE opportunity_id=? ORDER BY created_at DESC",
+        (oid,)
+    ).fetchall()
+    c.close()
+    if not opp:
+        return "Not found", 404
+    if opp["status"] != "Follow-up due":
+        return redirect(url_for(
+            "opportunity", oid=oid,
+            message="This opportunity is not due for a follow-up."
+        ))
+
+    generated, error = generate_followup_draft(opp, interactions)
+    if error:
+        return redirect(url_for("opportunity", oid=oid, message=error))
+
+    now = utcnow()
+    c = conn()
+    c.execute(
+        """UPDATE reply_drafts
+           SET status='superseded', updated_at=?
+           WHERE opportunity_id=? AND status IN ('draft','ready_for_review','approved')""",
+        (now, oid)
+    )
+    c.execute(
+        """INSERT INTO reply_drafts
+           (opportunity_id,interaction_id,subject,body,status,model,created_at,updated_at,draft_type)
+           VALUES(?,?,?,?,?,?,?,?,?)""",
+        (
+            oid, None, generated["subject"], generated["body"],
+            "ready_for_review", generated["model"], now, now, "follow_up"
+        )
+    )
+    c.commit()
+    c.close()
+    return redirect(url_for(
+        "opportunity", oid=oid,
+        message="Follow-up draft generated. Review and approve it before sending."
+    ))
 
 
 @app.route("/draft/<int:draft_id>/complete", methods=["POST"])
@@ -1500,6 +1682,15 @@ def send_draft(draft_id):
         return redirect(url_for("opportunity", oid=opp["id"], message=error))
 
     now = utcnow()
+    draft_type = draft["draft_type"] or "reply"
+    follow_up_due_at = None
+    follow_up_count = int(opp["follow_up_count"] or 0)
+    if draft_type == "follow_up":
+        follow_up_count += 1
+    else:
+        follow_up_due_at = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+        follow_up_count = 0
+
     c = conn()
     c.execute(
         """UPDATE reply_drafts
@@ -1526,9 +1717,11 @@ def send_draft(draft_id):
            SET status='Awaiting customer',
                next_action='Await customer reply',
                human_required=?,
-               last_contact=?
+               last_contact=?,
+               follow_up_due_at=?,
+               follow_up_count=?
            WHERE id=?""",
-        (False, now[:10], opp["id"])
+        (False, now[:10], follow_up_due_at, follow_up_count, opp["id"])
     )
     c.commit()
     c.close()
@@ -1841,6 +2034,7 @@ def health():
 if __name__ == "__main__":
     init_db()
     reconcile_current_work_state()
+    refresh_followup_states()
     app.run(
         host="0.0.0.0",
         port=int(os.getenv("PORT","5000")),
@@ -1849,5 +2043,6 @@ if __name__ == "__main__":
 else:
     init_db()
     reconcile_current_work_state()
+    refresh_followup_states()
     run_ai_self_test()
     bootstrap_gmail_on_start()
