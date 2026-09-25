@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Revenue Assistant — Login</title>
+<style>
+body{margin:0;font-family:Inter,system-ui,Segoe UI,Arial;background:#f4f7f5;color:#14221b;display:grid;place-items:center;min-height:100vh}
+.box{width:min(420px,92vw);background:#fff;border:1px solid #dfe7e2;border-radius:16px;padding:26px;box-shadow:0 12px 35px rgba(20,34,27,.08)}
+.logo{font-weight:900;color:#0f5b3a;font-size:21px;margin-bottom:24px}h1{margin:0 0 6px}.sub{color:#6f7b75;font-size:14px;margin-bottom:20px}
+input{width:100%;box-sizing:border-box;padding:12px;border:1px solid #dfe7e2;border-radius:9px;margin:8px 0 12px;font:inherit}
+button{width:100%;padding:11px;border:0;border-radius:9px;background:#157a4c;color:white;font-weight:800;font:inherit;cursor:pointer}
+.err{background:#fdeaea;color:#a53c3c;padding:10px;border-radius:9px;margin-bottom:12px}
+.small{font-size:12px;color:#6f7b75;margin-top:14px}
+</style></head><body><form class="box" method="post"><div class="logo">↗ AI Revenue Assistant</div><h1>Private test access</h1><div class="sub">Login is required before any live inbox can be connected.</div>{% if error %}<div class="err">{{error}}</div>{% endif %}<label><b>Password</b></label><input name="password" type="password" required autofocus><button type="submit">Open V1</button><div class="small">Development environment · not for customer use yet</div></form></body></html>
