@@ -1,5 +1,5 @@
 {% extends "layout.html" %}{% block content %}
-<h1>Gmail connection</h1><div class="sub">Test emails are fed into the same commercial conversation analyst used by the opportunity pipeline.</div>
+<h1>Gmail connection</h1><div class="sub">Customer emails feed the opportunity pipeline. Approved TEST replies can now be sent only after your explicit approval and send click.</div>
 {% if message %}<div class="notice" style="margin-top:16px">{{message}}</div>{% endif %}
 <div class="grid2" style="margin-top:18px">
 <div class="card"><h2>Connection</h2>
@@ -7,22 +7,30 @@
 <p><span class="pill amber">OAuth setup required</span></p>
 {% elif connection %}
 <p><span class="pill green">Connected</span></p><p><b>{{connection.email}}</b></p><p class="small">Last token update: {{connection.updated_at}}</p>
-<form method="post" action="/gmail/sync"><button class="btn primary" type="submit">Sync inbox now</button></form>
+{% if send_ready %}
+<p><span class="pill green">Read + approved send enabled</span></p>
+{% else %}
+<p><span class="pill amber">Read-only connection</span></p>
+<p class="small">Reconnect once to add Gmail send permission. Sending will still require a separately approved reply and an explicit Send click.</p>
+<a class="btn primary" href="/gmail/connect">Reconnect for sending</a>
+{% endif %}
+<form method="post" action="/gmail/sync" style="margin-top:12px"><button class="btn" type="submit">Sync inbox now</button></form>
 <form method="post" action="/gmail/disconnect" style="margin-top:10px"><button class="btn" type="submit">Disconnect</button></form>
 {% else %}
 <p><span class="pill blue">Ready to connect</span></p><a class="btn primary" href="/gmail/connect">Connect Gmail</a>
 {% endif %}
 </div>
-<div class="card"><h2>AI Conversation Analyst</h2>
-{% if ai_ready %}
-<p><span class="pill green">AI ready</span></p><p>Model: <b>{{model}}</b></p>
-<p>The analyst can extract multiple questions, objections, dependencies, actions and confidence from one customer message.</p>
-{% else %}
-<p><span class="pill amber">Rules fallback only</span></p>
-<p>The pipeline is working, but <code>OPENAI_API_KEY</code> has not been added yet. Emails will use the simpler fallback classifier until it is.</p>
-{% endif %}
+<div class="card"><h2>V1 safety</h2>
+<p><b>Sending is still test-only.</b></p>
+<p>The send endpoint refuses any conversation whose subject does not contain <b>[ARA TEST]</b>.</p>
+<p>An email can only be sent when its draft status is <b>Approved</b>, and a sent draft is locked against double-send.</p>
 <p><b>{{processed}}</b> Gmail messages have been processed by the permanent database.</p>
-<div class="notice">V1 still only syncs messages with <b>[ARA TEST]</b> in the subject.</div>
+<div class="notice">Inbox sync is also still limited to <b>[ARA TEST]</b> messages.</div>
 </div>
+</div>
+<div class="card" style="margin-top:18px"><h2>AI Conversation Analyst</h2>
+{% if ai_ready %}<p><span class="pill green">AI ready</span> Model: <b>{{model}}</b></p>
+<p>The analyst extracts multiple questions, objections, dependencies and actions from each conversation.</p>
+{% else %}<p><span class="pill amber">Rules fallback only</span></p>{% endif %}
 </div>
 {% endblock %}
