@@ -29,7 +29,7 @@ GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 GMAIL_SCOPES = [GMAIL_READ_SCOPE, GMAIL_SEND_SCOPE]
 
-STATUS_VALUES = ["New enquiry", "Considering", "Needs you", "Ready to send", "Accepted", "Lost", "Dormant"]
+STATUS_VALUES = ["New enquiry", "Considering", "Needs you", "Ready to send", "Accepted", "Awaiting customer", "Lost", "Dormant"]
 
 def utcnow():
     return datetime.now(timezone.utc).isoformat()
@@ -689,43 +689,51 @@ def get_morning_priorities(limit=6):
     c = conn()
     rows = c.execute(
         """SELECT * FROM opportunities
-           WHERE status NOT IN ('Lost','Dormant')
+           WHERE status NOT IN ('Lost','Dormant','Awaiting customer')
            ORDER BY
              CASE status
                WHEN 'Needs you' THEN 1
                WHEN 'Accepted' THEN 2
                WHEN 'New enquiry' THEN 3
-               WHEN 'Considering' THEN 4
-               WHEN 'Ready to send' THEN 5
+               WHEN 'Ready to send' THEN 4
+               WHEN 'Considering' THEN 5
                ELSE 6
              END,
              human_required DESC,
              quote_value DESC,
-             id DESC
-           LIMIT ?""",
-        (limit,)
+             id DESC"""
     ).fetchall()
+
     priorities=[]
     for row in rows:
         actions=c.execute(
             """SELECT * FROM action_items
-               WHERE opportunity_id=? AND status='open'
+               WHERE opportunity_id=? AND status='open' AND owner='business'
                ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, id DESC
                LIMIT 3""",
             (row["id"],)
         ).fetchall()
         draft=c.execute(
-            "SELECT id, status FROM reply_drafts WHERE opportunity_id=? ORDER BY id DESC LIMIT 1",
+            """SELECT id, status FROM reply_drafts
+               WHERE opportunity_id=? AND status NOT IN ('superseded')
+               ORDER BY id DESC LIMIT 1""",
             (row["id"],)
         ).fetchone()
-        priorities.append({
-            "opp": row,
-            "actions": actions,
-            "draft": draft
-        })
-    c.close()
-    return priorities
 
+        draft_needs_action = bool(draft and draft["status"] in ("draft","ready_for_review","approved"))
+        status_needs_action = bool(
+            row["human_required"]
+            or row["status"] in ("Needs you","New enquiry","Ready to send","Accepted")
+        )
+        if actions or draft_needs_action or status_needs_action:
+            priorities.append({
+                "opp": row,
+                "actions": actions,
+                "draft": draft
+            })
+
+    c.close()
+    return priorities[:limit]
 
 def guess_name(email_addr, body=""):
     local = (email_addr or "customer").split("@")[0]
@@ -746,16 +754,96 @@ def extract_quote_value(text):
     except ValueError:
         return 0
 
+def reconcile_current_work_state():
+    """Keep only the current customer turn actionable and restore sent jobs to a waiting state."""
+    c = conn()
+    superseded = 0
+    waiting = 0
+
+    opportunities = c.execute("SELECT id FROM opportunities").fetchall()
+    for item in opportunities:
+        oid = item["id"]
+
+        latest_inbound = c.execute(
+            """SELECT id, created_at
+               FROM interactions
+               WHERE opportunity_id=? AND direction='inbound'
+               ORDER BY id DESC LIMIT 1""",
+            (oid,)
+        ).fetchone()
+
+        if latest_inbound:
+            cur = c.execute(
+                """UPDATE action_items
+                   SET status='superseded'
+                   WHERE opportunity_id=? AND status='open'
+                     AND interaction_id IS NOT NULL AND interaction_id<>?""",
+                (oid, latest_inbound["id"])
+            )
+            superseded += max(cur.rowcount or 0, 0)
+
+        latest_sent = c.execute(
+            """SELECT sent_at
+               FROM reply_drafts
+               WHERE opportunity_id=? AND status='sent'
+               ORDER BY id DESC LIMIT 1""",
+            (oid,)
+        ).fetchone()
+
+        if latest_sent and (
+            not latest_inbound
+            or not latest_inbound["created_at"]
+            or latest_inbound["created_at"] <= (latest_sent["sent_at"] or "")
+        ):
+            c.execute(
+                """UPDATE opportunities
+                   SET status='Awaiting customer',
+                       next_action='Await customer reply',
+                       human_required=?
+                   WHERE id=?""",
+                (False, oid)
+            )
+            c.execute(
+                """UPDATE action_items
+                   SET status='completed'
+                   WHERE opportunity_id=? AND owner='business' AND status='open'""",
+                (oid,)
+            )
+            waiting += 1
+
+    c.commit()
+    c.close()
+    app.logger.info(
+        "WORK_STATE_RECONCILED superseded_actions=%s awaiting_customer=%s",
+        superseded, waiting
+    )
+
+
 def get_metrics():
     c = conn()
     rows = c.execute("SELECT * FROM opportunities").fetchall()
-    total = sum(r["quote_value"] or 0 for r in rows)
-    needs = sum((r["quote_value"] or 0) for r in rows if r["status"]=="Needs you")
-    ready = sum((r["quote_value"] or 0) for r in rows if r["status"]=="Ready to send")
-    accepted = sum((r["quote_value"] or 0) for r in rows if r["status"]=="Accepted")
-    open_actions = c.execute("SELECT COUNT(*) n FROM action_items WHERE status='open' AND owner='business'").fetchone()["n"]
+    open_rows = [r for r in rows if r["status"] not in ("Lost", "Dormant")]
+    total = sum(r["quote_value"] or 0 for r in open_rows)
+    attention = sum(
+        (r["quote_value"] or 0)
+        for r in open_rows
+        if r["status"] != "Awaiting customer"
+        and (bool(r["human_required"]) or r["status"] in ("Needs you","New enquiry","Ready to send","Accepted"))
+    )
+    awaiting = sum(
+        (r["quote_value"] or 0)
+        for r in open_rows if r["status"] == "Awaiting customer"
+    )
+    open_actions = c.execute(
+        "SELECT COUNT(*) n FROM action_items WHERE status='open' AND owner='business'"
+    ).fetchone()["n"]
     c.close()
-    return {"open": total, "needs": needs, "ready": ready, "accepted": accepted, "open_actions": open_actions}
+    return {
+        "open": total,
+        "needs": attention,
+        "awaiting": awaiting,
+        "open_actions": open_actions
+    }
 
 def ingest_email(sender, subject, body, project="Email enquiry", quote_value=0, name=None, external_id=None):
     name = name or guess_name(sender, body)
@@ -824,6 +912,20 @@ def ingest_email(sender, subject, body, project="Email enquiry", quote_value=0, 
         )
     )
     interaction_id = cur.fetchone()["id"]
+
+    # A new inbound customer turn replaces the previous "what needs doing" list.
+    c.execute(
+        """UPDATE action_items
+           SET status='superseded'
+           WHERE opportunity_id=? AND status='open'""",
+        (oid,)
+    )
+    c.execute(
+        """UPDATE reply_drafts
+           SET status='superseded', updated_at=?
+           WHERE opportunity_id=? AND status IN ('draft','ready_for_review','approved')""",
+        (now, oid)
+    )
 
     for item in analysis.get("actions", []):
         c.execute(
@@ -1360,8 +1462,13 @@ def send_draft(draft_id):
         (opp["id"],)
     )
     c.execute(
-        "UPDATE opportunities SET next_action='Await customer reply', last_contact=? WHERE id=?",
-        (now[:10], opp["id"])
+        """UPDATE opportunities
+           SET status='Awaiting customer',
+               next_action='Await customer reply',
+               human_required=?,
+               last_contact=?
+           WHERE id=?""",
+        (False, now[:10], opp["id"])
     )
     c.commit()
     c.close()
@@ -1444,7 +1551,8 @@ def gmail_page():
         processed=count,
         message=request.args.get("message"),
         ai_ready=openai_configured(),
-        model=OPENAI_MODEL
+        model=OPENAI_MODEL,
+        send_ready=gmail_send_authorized()
     )
 
 @app.route("/gmail/connect")
@@ -1632,6 +1740,7 @@ def health():
 
 if __name__ == "__main__":
     init_db()
+    reconcile_current_work_state()
     app.run(
         host="0.0.0.0",
         port=int(os.getenv("PORT","5000")),
@@ -1639,5 +1748,6 @@ if __name__ == "__main__":
     )
 else:
     init_db()
+    reconcile_current_work_state()
     run_ai_self_test()
     bootstrap_gmail_on_start()
