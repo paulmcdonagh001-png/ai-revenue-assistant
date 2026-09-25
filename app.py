@@ -388,7 +388,7 @@ def mark_reviewed(oid):
 
 @app.route("/health")
 def health():
-    return jsonify({"status":"ok"})
+    return jsonify({"status":"ok","google_client_id":bool(os.getenv("GOOGLE_CLIENT_ID")),"google_client_secret":bool(os.getenv("GOOGLE_CLIENT_SECRET")),"google_configured":google_configured()})
 
 if __name__ == "__main__":
     init_db()
