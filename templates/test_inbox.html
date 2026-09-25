@@ -1,0 +1,23 @@
+{% extends "layout.html" %}{% block content %}
+<h1>Test Inbox</h1><div class="sub">Paste a fictional customer email. The backend will classify it and update/create the opportunity.</div>
+<div class="grid2" style="margin-top:18px">
+<form class="card" method="post">
+<div class="field"><label>Customer name</label><input name="customer_name" placeholder="Sarah Smith"></div>
+<div class="field"><label>Sender email</label><input name="sender" type="email" required placeholder="sarah@example.com"></div>
+<div class="field"><label>Project</label><input name="project" value="Patio replacement"></div>
+<div class="field"><label>Quote value</label><input name="quote_value" type="number" value="8450"></div>
+<div class="field"><label>Subject</label><input name="subject" value="Re: Patio quotation"></div>
+<div class="field"><label>Email body</label><textarea name="body">Thanks for the quote. We really like it, but it is more than we expected. Is there any room on the price?</textarea></div>
+<button class="btn primary" type="submit">Ingest test email</button>
+</form>
+<div class="card"><h2>Classifier output</h2>
+{% if result %}
+<div class="notice"><b>{{result.classification}}</b><p>Status → {{result.status}}</p><p>Next action → {{result.next_action}}</p><a class="btn primary" href="/opportunity/{{result.opportunity_id}}">Open opportunity</a></div>
+{% else %}
+<p class="sub">Nothing ingested yet.</p>
+<p>This screen represents the hand-off point where Gmail will eventually feed real inbound messages into the exact same classifier.</p>
+{% endif %}
+<h2 style="margin-top:22px">Try phrases like</h2>
+<ul class="small"><li>“Can you do anything on price?”</li><li>“Yes please, we'd like to go ahead.”</li><li>“We've chosen another company.”</li><li>“Can you start before October?”</li></ul>
+</div></div>
+{% endblock %}
