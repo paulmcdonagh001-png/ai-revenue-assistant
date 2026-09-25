@@ -1,13 +1,26 @@
 {% extends "layout.html" %}{% block content %}
-<h1>Good morning, Paul</h1><div class="sub">The database is now driving this dashboard.</div>
+<h1>Good morning, Paul</h1>
+<div class="sub">Here is what needs your attention first. Nothing is sent automatically.</div>
 <div class="cards">
 <div class="card"><div class="label">Open pipeline</div><div class="value">{{ money(metrics.open) }}</div></div>
 <div class="card"><div class="label">Requires attention</div><div class="value">{{ money(metrics.needs) }}</div><span class="pill red">Owner action</span></div>
-<div class="card"><div class="label">AI can follow up</div><div class="value">{{ money(metrics.ready) }}</div><span class="pill green">Ready</span></div>
-<div class="card"><div class="label">Accepted in database</div><div class="value">{{ money(metrics.accepted) }}</div></div>
+<div class="card"><div class="label">Open owner actions</div><div class="value">{{ metrics.open_actions }}</div><span class="pill amber">To review</span></div>
+<div class="card"><div class="label">Accepted</div><div class="value">{{ money(metrics.accepted) }}</div><span class="pill green">Won</span></div>
 </div>
+
+<div class="card" style="margin-bottom:18px">
+<div style="display:flex;justify-content:space-between;align-items:center;gap:16px"><div><h2 style="margin:0">Morning priorities</h2><div class="sub">Highest-attention opportunities, with the reason and next job to do.</div></div><a class="btn" href="/gmail">Sync Gmail</a></div>
+<div style="margin-top:14px">
+{% for p in priorities %}
+<a href="/opportunity/{{p.opp.id}}" class="priority-row">
+<div><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b>{{p.opp.customer_name}}</b><span class="pill {% if p.opp.status=='Needs you' %}red{% elif p.opp.status=='Accepted' %}green{% else %}amber{% endif %}">{{p.opp.status}}</span>{% if p.opp.confidence is not none %}<span class="pill blue">{{(p.opp.confidence*100)|round|int}}%</span>{% endif %}</div><div class="small" style="margin-top:5px">{{p.opp.project}} · {{money(p.opp.quote_value)}}</div><div style="margin-top:8px">{{p.opp.ai_summary or p.opp.next_action or 'Review opportunity'}}</div>{% if p.actions %}<div class="small" style="margin-top:6px"><b>Next:</b> {{p.actions[0].description}}{% if p.actions|length > 1 %} · +{{p.actions|length - 1}} more{% endif %}</div>{% endif %}</div>
+<div style="text-align:right;min-width:120px">{% if p.draft %}<span class="pill green">Draft ready</span>{% else %}<span class="pill blue">Open</span>{% endif %}<div class="small" style="margin-top:8px">{{p.opp.last_contact or ''}}</div></div>
+</a>
+{% else %}<div class="notice">Nothing needs attention yet.</div>{% endfor %}
+</div></div>
+
 <div class="card">
-<div style="display:flex;justify-content:space-between;align-items:center"><div><h2>Opportunities</h2><div class="sub">Click any job to view its record.</div></div><a class="btn primary" href="/test-inbox">Simulate an email</a></div>
+<div style="display:flex;justify-content:space-between;align-items:center"><div><h2>All opportunities</h2><div class="sub">Click any job to view the full conversation and actions.</div></div><a class="btn primary" href="/test-inbox">Simulate an email</a></div>
 <table style="margin-top:14px"><thead><tr><th>Customer / Project</th><th>Value</th><th>Status</th><th>Next action</th><th>Last contact</th></tr></thead><tbody>
 {% for o in opps %}
 <tr onclick="location.href='/opportunity/{{o.id}}'" style="cursor:pointer">
