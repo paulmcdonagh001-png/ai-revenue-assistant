@@ -1,4 +1,6 @@
 import secrets
+import threading
+import time
 
 import os
 import re
@@ -27,6 +29,10 @@ BASE_URL = os.getenv("BASE_URL", "http://localhost:5000").rstrip("/")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
 AUTO_SYNC_KEY = os.getenv("AUTO_SYNC_KEY", "")
+AUTO_SYNC_INTERVAL_SECONDS = int(os.getenv("AUTO_SYNC_INTERVAL_SECONDS", "120"))
+_auto_sync_lock = threading.Lock()
+_last_auto_sync_monotonic = 0.0
+_last_auto_sync_at = None
 GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 GMAIL_SCOPES = [GMAIL_READ_SCOPE, GMAIL_SEND_SCOPE]
@@ -1203,6 +1209,56 @@ def gmail_body(payload):
             return text
     return ""
 
+def maybe_auto_sync(force=False):
+    global _last_auto_sync_monotonic, _last_auto_sync_at
+
+    now_mono = time.monotonic()
+    if (
+        not force
+        and _last_auto_sync_monotonic
+        and now_mono - _last_auto_sync_monotonic < AUTO_SYNC_INTERVAL_SECONDS
+    ):
+        return {
+            "checked": False,
+            "created": 0,
+            "last_checked": _last_auto_sync_at,
+            "error": None
+        }
+
+    if not _auto_sync_lock.acquire(blocking=False):
+        return {
+            "checked": False,
+            "created": 0,
+            "last_checked": _last_auto_sync_at,
+            "error": None
+        }
+
+    try:
+        result = sync_test_gmail_messages()
+        _last_auto_sync_monotonic = time.monotonic()
+        _last_auto_sync_at = utcnow()
+        return {
+            "checked": True,
+            "created": result.get("created", 0),
+            "duplicates": result.get("duplicates", 0),
+            "skipped": result.get("skipped", 0),
+            "last_checked": _last_auto_sync_at,
+            "error": result.get("error")
+        }
+    except Exception as exc:
+        _last_auto_sync_monotonic = time.monotonic()
+        _last_auto_sync_at = utcnow()
+        app.logger.error("DASHBOARD_AUTO_SYNC_FAILED type=%s", type(exc).__name__)
+        return {
+            "checked": True,
+            "created": 0,
+            "last_checked": _last_auto_sync_at,
+            "error": type(exc).__name__
+        }
+    finally:
+        _auto_sync_lock.release()
+
+
 @app.route("/login", methods=["GET","POST"])
 def login():
     if request.method == "POST":
@@ -1220,6 +1276,7 @@ def logout():
 @app.route("/")
 @login_required
 def dashboard():
+    sync_state = maybe_auto_sync()
     c = conn()
     opps = c.execute("SELECT * FROM opportunities ORDER BY quote_value DESC, id DESC").fetchall()
     c.close()
@@ -1228,7 +1285,8 @@ def dashboard():
         opps=opps,
         priorities=get_morning_priorities(),
         metrics=get_metrics(),
-        money=money
+        money=money,
+        sync_state=sync_state
     )
 
 @app.route("/opportunity/<int:oid>")
@@ -1712,6 +1770,16 @@ def gmail_sync():
         "gmail_page",
         message=f"Sync complete: {result['created']} new messages ingested, {result['duplicates']} already seen, {result['skipped']} skipped."
     ))
+
+@app.route("/api/auto-sync-pulse", methods=["POST"])
+@login_required
+def auto_sync_pulse():
+    state = maybe_auto_sync()
+    return jsonify({
+        "ok": not bool(state.get("error")),
+        **state
+    })
+
 
 @app.route("/internal/auto-sync", methods=["POST"])
 def internal_auto_sync():
