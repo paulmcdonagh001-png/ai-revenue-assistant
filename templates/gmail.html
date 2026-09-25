@@ -1,20 +1,28 @@
 {% extends "layout.html" %}{% block content %}
-<h1>Gmail connection</h1><div class="sub">V1 reads recent inbox messages and feeds them into the same opportunity classifier as Test Inbox.</div>
+<h1>Gmail connection</h1><div class="sub">Test emails are fed into the same commercial conversation analyst used by the opportunity pipeline.</div>
 {% if message %}<div class="notice" style="margin-top:16px">{{message}}</div>{% endif %}
 <div class="grid2" style="margin-top:18px">
 <div class="card"><h2>Connection</h2>
 {% if not configured %}
 <p><span class="pill amber">OAuth setup required</span></p>
-<p>The app code is ready, but Google still needs a Client ID and Client Secret for this website.</p>
-<p class="small">Redirect URL to enter in Google Cloud:</p><p><code>{{ request.url_root.rstrip('/') }}/gmail/callback</code></p>
 {% elif connection %}
 <p><span class="pill green">Connected</span></p><p><b>{{connection.email}}</b></p><p class="small">Last token update: {{connection.updated_at}}</p>
 <form method="post" action="/gmail/sync"><button class="btn primary" type="submit">Sync inbox now</button></form>
 <form method="post" action="/gmail/disconnect" style="margin-top:10px"><button class="btn" type="submit">Disconnect</button></form>
 {% else %}
-<p><span class="pill blue">Ready to connect</span></p><p>Google OAuth is configured. Connect a test Gmail inbox to continue.</p><a class="btn primary" href="/gmail/connect">Connect Gmail</a>
+<p><span class="pill blue">Ready to connect</span></p><a class="btn primary" href="/gmail/connect">Connect Gmail</a>
 {% endif %}
 </div>
-<div class="card"><h2>Safety for first test</h2><p><b>Read-only Gmail access.</b></p><p>The app cannot send, delete, archive or modify email. Sync is manual for now.</p><p><b>{{processed}}</b> Gmail messages have been processed by this temporary V1 database.</p><div class="notice">For the first end-to-end test, send a fictional customer enquiry to the connected inbox from a different email address, then press Sync inbox now.</div></div>
+<div class="card"><h2>AI Conversation Analyst</h2>
+{% if ai_ready %}
+<p><span class="pill green">AI ready</span></p><p>Model: <b>{{model}}</b></p>
+<p>The analyst can extract multiple questions, objections, dependencies, actions and confidence from one customer message.</p>
+{% else %}
+<p><span class="pill amber">Rules fallback only</span></p>
+<p>The pipeline is working, but <code>OPENAI_API_KEY</code> has not been added yet. Emails will use the simpler fallback classifier until it is.</p>
+{% endif %}
+<p><b>{{processed}}</b> Gmail messages have been processed by the permanent database.</p>
+<div class="notice">V1 still only syncs messages with <b>[ARA TEST]</b> in the subject.</div>
+</div>
 </div>
 {% endblock %}
