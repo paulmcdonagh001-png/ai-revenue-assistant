@@ -613,6 +613,36 @@ def ingest_email(sender, subject, body, project="Email enquiry", quote_value=0, 
         "analysis": analysis
     }, "created"
 
+
+def run_ai_self_test():
+    if os.getenv("AI_SELF_TEST_ON_START") != "1":
+        return
+    if not openai_configured():
+        app.logger.error("AI_SELF_TEST_FAILED type=MissingAPIKey")
+        return
+    try:
+        from openai import OpenAI
+        client = OpenAI()
+        response = client.responses.create(
+            model=OPENAI_MODEL,
+            input="Return exactly the word OK.",
+            max_output_tokens=16
+        )
+        output = (response.output_text or "").strip()[:20]
+        app.logger.warning("AI_SELF_TEST_OK model=%s output=%s", OPENAI_MODEL, output)
+    except Exception as exc:
+        status = getattr(exc, "status_code", None)
+        code = None
+        body = getattr(exc, "body", None)
+        if isinstance(body, dict):
+            code = body.get("code")
+            if not code and isinstance(body.get("error"), dict):
+                code = body["error"].get("code")
+        app.logger.error(
+            "AI_SELF_TEST_FAILED type=%s status=%s code=%s",
+            type(exc).__name__, status, code
+        )
+
 def google_configured():
     return bool(os.getenv("GOOGLE_CLIENT_ID") and os.getenv("GOOGLE_CLIENT_SECRET"))
 
@@ -939,3 +969,4 @@ if __name__ == "__main__":
     )
 else:
     init_db()
+    run_ai_self_test()
