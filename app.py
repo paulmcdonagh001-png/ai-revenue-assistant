@@ -780,17 +780,54 @@ def run_ai_self_test():
             8450
         )
         app.logger.warning(
-            "AI_SELF_TEST_OK source=%s status=%s intent=%s confidence=%.2f questions=%s actions=%s dependencies=%s human_required=%s summary=%s",
+            "AI_SELF_TEST_ANALYSIS_OK source=%s status=%s intent=%s confidence=%.2f questions=%s actions=%s dependencies=%s",
             analysis.get("analysis_source"),
             analysis.get("opportunity_status"),
             analysis.get("customer_intent"),
             float(analysis.get("confidence", 0)),
             len(analysis.get("questions", [])),
             len(analysis.get("actions", [])),
-            len(analysis.get("dependencies", [])),
-            analysis.get("human_required"),
-            (analysis.get("summary") or "")[:220]
+            len(analysis.get("dependencies", []))
         )
+
+        fake_opp = {
+            "customer_name": "Test Customer",
+            "project": "Patio quotation",
+            "quote_value": 8450,
+            "status": analysis.get("opportunity_status"),
+            "ai_summary": analysis.get("summary"),
+            "customer_intent": analysis.get("customer_intent")
+        }
+        fake_interactions = [{
+            "id": 999999,
+            "direction": "inbound",
+            "subject": "Patio quotation",
+            "body": sample,
+            "latest_text": sample
+        }]
+        fake_actions = [{
+            "category": item.get("category","other"),
+            "description": item.get("description",""),
+            "priority": item.get("priority","medium"),
+            "owner": item.get("owner","business"),
+            "status": "open"
+        } for item in analysis.get("actions", [])]
+        draft, draft_error = generate_reply_draft(
+            fake_opp,
+            fake_interactions,
+            fake_actions,
+            analysis
+        )
+        if draft_error or not draft:
+            app.logger.error("AI_SELF_TEST_DRAFT_FAILED error=%s", draft_error or "empty")
+        else:
+            body = draft.get("body","")
+            app.logger.warning(
+                "AI_SELF_TEST_DRAFT_OK chars=%s has_placeholder=%s preview=%s",
+                len(body),
+                ("[" in body and "]" in body),
+                body[:450].replace("\n"," ")
+            )
     except Exception as exc:
         status = getattr(exc, "status_code", None)
         code = None
