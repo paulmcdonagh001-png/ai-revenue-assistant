@@ -186,7 +186,7 @@ def ingest_email(sender, subject, body, project="Email enquiry", quote_value=0, 
 def google_configured():
     return bool(os.getenv("GOOGLE_CLIENT_ID") and os.getenv("GOOGLE_CLIENT_SECRET"))
 
-def gmail_flow(state=None):
+def gmail_flow(state=None, code_verifier=None):
     from google_auth_oauthlib.flow import Flow
     config = {
         "web": {
@@ -197,7 +197,13 @@ def gmail_flow(state=None):
             "redirect_uris": [f"{BASE_URL}/gmail/callback"]
         }
     }
-    flow = Flow.from_client_config(config, scopes=GMAIL_SCOPES, state=state)
+    flow = Flow.from_client_config(
+        config,
+        scopes=GMAIL_SCOPES,
+        state=state,
+        code_verifier=code_verifier,
+        autogenerate_code_verifier=(code_verifier is None)
+    )
     flow.redirect_uri = f"{BASE_URL}/gmail/callback"
     return flow
 
@@ -311,6 +317,7 @@ def gmail_connect():
         prompt="consent"
     )
     session["oauth_state"] = state
+    session["oauth_code_verifier"] = flow.code_verifier
     return redirect(auth_url)
 
 @app.route("/gmail/callback")
@@ -318,7 +325,10 @@ def gmail_connect():
 def gmail_callback():
     if not google_configured():
         return redirect(url_for("gmail_page", message="Google OAuth is not configured."))
-    flow = gmail_flow(session.get("oauth_state"))
+    flow = gmail_flow(
+        session.get("oauth_state"),
+        session.pop("oauth_code_verifier", None)
+    )
     flow.fetch_token(authorization_response=request.url)
     creds = flow.credentials
     from googleapiclient.discovery import build
