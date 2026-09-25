@@ -1,13 +1,27 @@
 
 import os
 import re
+import json
+import base64
 import sqlite3
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify
+from functools import wraps
+from email.utils import parseaddr
+
+from flask import Flask, render_template, request, jsonify, redirect, url_for, session
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "dev-secret-change-me")
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.getenv("BASE_URL", "").startswith("https://")
+)
+
 DB = os.getenv("DATABASE_PATH", "revenue_assistant.db")
+BASE_URL = os.getenv("BASE_URL", "http://localhost:5000").rstrip("/")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
 def conn():
     c = sqlite3.connect(DB)
@@ -41,6 +55,17 @@ def init_db():
         created_at TEXT NOT NULL,
         FOREIGN KEY(opportunity_id) REFERENCES opportunities(id)
     );
+    CREATE TABLE IF NOT EXISTS gmail_connection(
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        email TEXT,
+        token_json TEXT,
+        updated_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS processed_messages(
+        gmail_id TEXT PRIMARY KEY,
+        opportunity_id INTEGER,
+        processed_at TEXT NOT NULL
+    );
     """)
     count = c.execute("SELECT COUNT(*) n FROM opportunities").fetchone()["n"]
     if count == 0:
@@ -62,6 +87,14 @@ def init_db():
 
 def money(v):
     return f"£{v:,.0f}"
+
+def login_required(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect(url_for("login", next=request.path))
+        return fn(*args, **kwargs)
+    return wrapped
 
 def classify_email(subject, body):
     text = f"{subject} {body}".lower()
@@ -94,10 +127,19 @@ def classify_email(subject, body):
         next_action = "Watch / follow up later"
     return classification, status, objection, next_action
 
-def guess_name(email, body):
-    local = (email or "customer").split("@")[0]
-    candidate = re.sub(r"[._-]+"," ",local).strip().title()
+def guess_name(email_addr, body=""):
+    local = (email_addr or "customer").split("@")[0]
+    candidate = re.sub(r"[._+-]+"," ",local).strip().title()
     return candidate if candidate else "New Customer"
+
+def extract_quote_value(text):
+    matches = re.findall(r"£\s?([0-9]{1,3}(?:,[0-9]{3})*(?:\.\d{1,2})?|[0-9]+(?:\.\d{1,2})?)", text or "")
+    if not matches:
+        return 0
+    try:
+        return float(matches[-1].replace(",",""))
+    except ValueError:
+        return 0
 
 def get_metrics():
     c = conn()
@@ -109,7 +151,114 @@ def get_metrics():
     c.close()
     return {"open": total, "needs": needs, "ready": ready, "accepted": accepted}
 
+def ingest_email(sender, subject, body, project="Email enquiry", quote_value=0, name=None, external_id=None):
+    classification, status, objection, next_action = classify_email(subject, body)
+    name = name or guess_name(sender, body)
+    now = datetime.utcnow().isoformat()
+    c = conn()
+    if external_id:
+        seen = c.execute("SELECT gmail_id FROM processed_messages WHERE gmail_id=?", (external_id,)).fetchone()
+        if seen:
+            c.close()
+            return None, "duplicate"
+
+    existing = c.execute("SELECT * FROM opportunities WHERE lower(customer_email)=lower(?) ORDER BY id DESC LIMIT 1",(sender,)).fetchone()
+    if existing:
+        oid = existing["id"]
+        c.execute("""UPDATE opportunities SET status=?, objection=?, next_action=?, last_contact=?,
+                   quote_value=CASE WHEN ? > 0 THEN ? ELSE quote_value END
+                   WHERE id=?""",(status,objection,next_action,now[:10],quote_value,quote_value,oid))
+    else:
+        cur = c.execute("""INSERT INTO opportunities
+        (customer_name,customer_email,project,location,quote_value,status,objection,next_action,last_contact,created_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?)""",
+        (name,sender,project,"",quote_value,status,objection,next_action,now[:10],now))
+        oid = cur.lastrowid
+    c.execute("""INSERT INTO interactions
+    (opportunity_id,direction,channel,subject,body,classification,created_at)
+    VALUES(?,?,?,?,?,?,?)""",(oid,"inbound","email",subject,body,classification,now))
+    if external_id:
+        c.execute("INSERT INTO processed_messages(gmail_id,opportunity_id,processed_at) VALUES(?,?,?)",(external_id,oid,now))
+    c.commit()
+    c.close()
+    return {"classification":classification,"status":status,"next_action":next_action,"opportunity_id":oid}, "created"
+
+def google_configured():
+    return bool(os.getenv("GOOGLE_CLIENT_ID") and os.getenv("GOOGLE_CLIENT_SECRET"))
+
+def gmail_flow(state=None):
+    from google_auth_oauthlib.flow import Flow
+    config = {
+        "web": {
+            "client_id": os.getenv("GOOGLE_CLIENT_ID"),
+            "client_secret": os.getenv("GOOGLE_CLIENT_SECRET"),
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [f"{BASE_URL}/gmail/callback"]
+        }
+    }
+    flow = Flow.from_client_config(config, scopes=GMAIL_SCOPES, state=state)
+    flow.redirect_uri = f"{BASE_URL}/gmail/callback"
+    return flow
+
+def gmail_service():
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request as GoogleRequest
+    from googleapiclient.discovery import build
+
+    c = conn()
+    row = c.execute("SELECT * FROM gmail_connection WHERE id=1").fetchone()
+    c.close()
+    if not row or not row["token_json"]:
+        return None, None
+    info = json.loads(row["token_json"])
+    creds = Credentials.from_authorized_user_info(info, GMAIL_SCOPES)
+    if creds.expired and creds.refresh_token:
+        creds.refresh(GoogleRequest())
+        c = conn()
+        c.execute("UPDATE gmail_connection SET token_json=?, updated_at=? WHERE id=1",
+                  (creds.to_json(), datetime.utcnow().isoformat()))
+        c.commit(); c.close()
+    return build("gmail","v1",credentials=creds,cache_discovery=False), row["email"]
+
+def decode_part(data):
+    if not data:
+        return ""
+    try:
+        return base64.urlsafe_b64decode(data + "===").decode("utf-8", errors="ignore")
+    except Exception:
+        return ""
+
+def gmail_body(payload):
+    mime = payload.get("mimeType","")
+    body = payload.get("body",{}).get("data")
+    if body and mime in ("text/plain","text/html"):
+        text = decode_part(body)
+        if mime == "text/html":
+            text = re.sub(r"<[^>]+>"," ",text)
+        return re.sub(r"\s+"," ",text).strip()
+    for part in payload.get("parts",[]) or []:
+        text = gmail_body(part)
+        if text:
+            return text
+    return ""
+
+@app.route("/login", methods=["GET","POST"])
+def login():
+    if request.method == "POST":
+        if ADMIN_PASSWORD and request.form.get("password","") == ADMIN_PASSWORD:
+            session["logged_in"] = True
+            return redirect(request.args.get("next") or url_for("dashboard"))
+        return render_template("login.html", error="Incorrect password.")
+    return render_template("login.html", error=None)
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
 @app.route("/")
+@login_required
 def dashboard():
     c = conn()
     opps = c.execute("SELECT * FROM opportunities ORDER BY quote_value DESC").fetchall()
@@ -117,6 +266,7 @@ def dashboard():
     return render_template("index.html", opps=opps, metrics=get_metrics(), money=money)
 
 @app.route("/opportunity/<int:oid>")
+@login_required
 def opportunity(oid):
     c = conn()
     opp = c.execute("SELECT * FROM opportunities WHERE id=?", (oid,)).fetchone()
@@ -127,6 +277,7 @@ def opportunity(oid):
     return render_template("opportunity.html", opp=opp, interactions=interactions, money=money)
 
 @app.route("/test-inbox", methods=["GET","POST"])
+@login_required
 def test_inbox():
     result = None
     if request.method == "POST":
@@ -136,31 +287,91 @@ def test_inbox():
         value = float(request.form.get("quote_value") or 0)
         project = request.form.get("project","New enquiry").strip() or "New enquiry"
         name = request.form.get("customer_name","").strip() or guess_name(sender, body)
-        classification, status, objection, next_action = classify_email(subject, body)
-
-        c = conn()
-        existing = c.execute("SELECT * FROM opportunities WHERE lower(customer_email)=lower(?) ORDER BY id DESC LIMIT 1",(sender,)).fetchone()
-        now = datetime.utcnow().isoformat()
-        if existing:
-            oid = existing["id"]
-            c.execute("""UPDATE opportunities SET status=?, objection=?, next_action=?, last_contact=?,
-                       quote_value=CASE WHEN ? > 0 THEN ? ELSE quote_value END
-                       WHERE id=?""",(status,objection,next_action,now[:10],value,value,oid))
-        else:
-            cur = c.execute("""INSERT INTO opportunities
-            (customer_name,customer_email,project,location,quote_value,status,objection,next_action,last_contact,created_at)
-            VALUES(?,?,?,?,?,?,?,?,?,?)""",
-            (name,sender,project,"",value,status,objection,next_action,now[:10],now))
-            oid = cur.lastrowid
-        c.execute("""INSERT INTO interactions
-        (opportunity_id,direction,channel,subject,body,classification,created_at)
-        VALUES(?,?,?,?,?,?,?)""",(oid,"inbound","email",subject,body,classification,now))
-        c.commit()
-        c.close()
-        result = {"classification":classification,"status":status,"next_action":next_action,"opportunity_id":oid}
+        result, _ = ingest_email(sender,subject,body,project,value,name)
     return render_template("test_inbox.html", result=result)
 
+@app.route("/gmail")
+@login_required
+def gmail_page():
+    c = conn()
+    row = c.execute("SELECT * FROM gmail_connection WHERE id=1").fetchone()
+    count = c.execute("SELECT COUNT(*) n FROM processed_messages").fetchone()["n"]
+    c.close()
+    return render_template("gmail.html", configured=google_configured(), connection=row, processed=count, message=request.args.get("message"))
+
+@app.route("/gmail/connect")
+@login_required
+def gmail_connect():
+    if not google_configured():
+        return redirect(url_for("gmail_page", message="Google OAuth is not configured yet."))
+    flow = gmail_flow()
+    auth_url, state = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent"
+    )
+    session["oauth_state"] = state
+    return redirect(auth_url)
+
+@app.route("/gmail/callback")
+@login_required
+def gmail_callback():
+    if not google_configured():
+        return redirect(url_for("gmail_page", message="Google OAuth is not configured."))
+    flow = gmail_flow(session.get("oauth_state"))
+    flow.fetch_token(authorization_response=request.url)
+    creds = flow.credentials
+    from googleapiclient.discovery import build
+    service = build("gmail","v1",credentials=creds,cache_discovery=False)
+    email_addr = service.users().getProfile(userId="me").execute().get("emailAddress","")
+    c = conn()
+    c.execute("""INSERT INTO gmail_connection(id,email,token_json,updated_at)
+                 VALUES(1,?,?,?)
+                 ON CONFLICT(id) DO UPDATE SET email=excluded.email, token_json=excluded.token_json, updated_at=excluded.updated_at""",
+              (email_addr,creds.to_json(),datetime.utcnow().isoformat()))
+    c.commit(); c.close()
+    return redirect(url_for("gmail_page", message=f"Connected {email_addr}"))
+
+@app.route("/gmail/disconnect", methods=["POST"])
+@login_required
+def gmail_disconnect():
+    c=conn(); c.execute("DELETE FROM gmail_connection WHERE id=1"); c.commit(); c.close()
+    return redirect(url_for("gmail_page", message="Gmail disconnected."))
+
+@app.route("/gmail/sync", methods=["POST"])
+@login_required
+def gmail_sync():
+    service, connected_email = gmail_service()
+    if not service:
+        return redirect(url_for("gmail_page", message="Connect Gmail first."))
+    response = service.users().messages().list(userId="me", q="in:inbox newer_than:14d", maxResults=25).execute()
+    ids = [x["id"] for x in response.get("messages",[])]
+    created = duplicates = skipped = 0
+    for mid in reversed(ids):
+        c = conn()
+        already = c.execute("SELECT gmail_id FROM processed_messages WHERE gmail_id=?",(mid,)).fetchone()
+        c.close()
+        if already:
+            duplicates += 1
+            continue
+        msg = service.users().messages().get(userId="me", id=mid, format="full").execute()
+        payload = msg.get("payload",{})
+        headers = {h.get("name","").lower():h.get("value","") for h in payload.get("headers",[])}
+        display_name, sender = parseaddr(headers.get("from",""))
+        if not sender or sender.lower() == (connected_email or "").lower():
+            skipped += 1
+            continue
+        subject = headers.get("subject","(no subject)")
+        body = gmail_body(payload) or msg.get("snippet","")
+        quote_value = extract_quote_value(subject + " " + body)
+        project = subject[:120] if subject else "Email enquiry"
+        result, state = ingest_email(sender,subject,body,project,quote_value,display_name or None,external_id=mid)
+        if state == "created":
+            created += 1
+    return redirect(url_for("gmail_page", message=f"Sync complete: {created} new messages ingested, {duplicates} already seen, {skipped} skipped."))
+
 @app.route("/api/opportunities")
+@login_required
 def api_opportunities():
     c=conn()
     rows=[dict(r) for r in c.execute("SELECT * FROM opportunities ORDER BY id DESC").fetchall()]
@@ -168,6 +379,7 @@ def api_opportunities():
     return jsonify(rows)
 
 @app.route("/api/opportunity/<int:oid>/mark-reviewed", methods=["POST"])
+@login_required
 def mark_reviewed(oid):
     c=conn()
     c.execute("UPDATE opportunities SET next_action='Reviewed by owner' WHERE id=?",(oid,))
