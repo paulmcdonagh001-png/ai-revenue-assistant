@@ -17,8 +17,48 @@
 {% for a in actions %}<div class="action"><b>{{a.description}}</b><div class="small">{{a.category}} · {{a.owner}} · {{a.priority}} priority · {{(a.confidence*100)|round|int}}%</div></div>{% else %}<div class="small">No open action items.</div>{% endfor %}
 </div>
 
-<div class="card" style="margin-top:18px"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><h2 style="margin:0">Reply assistant</h2><div class="small">AI drafts only. You review it. Gmail is still read-only.</div></div><form method="post" action="/opportunity/{{opp.id}}/draft-reply"><button class="btn primary" type="submit">{% if draft %}Regenerate draft{% else %}Generate reply draft{% endif %}</button></form></div>
-{% if draft %}<form method="post" action="/draft/{{draft.id}}/save" style="margin-top:14px"><div class="field"><label>Draft reply</label><textarea name="body" style="min-height:240px">{{draft.body}}</textarea></div><div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><button class="btn" type="submit">Save edits</button><span class="small">Generated with {{draft.model}} · not sent</span></div></form>{% else %}<div class="sub" style="margin-top:14px">Generate a draft after reviewing the customer questions above. Missing business facts will appear as [placeholders], not invented answers.</div>{% endif %}
+<div class="card" style="margin-top:18px">
+<div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+<div><h2 style="margin:0">Reply assistant</h2><div class="small">AI prepares it. You supply business facts and approve it. Nothing is sent automatically.</div></div>
+<form method="post" action="/opportunity/{{opp.id}}/draft-reply"><button class="btn" type="submit">{% if draft %}Start a fresh draft{% else %}Generate reply draft{% endif %}</button></form>
+</div>
+
+{% if draft %}
+<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px">
+{% if draft.status=='approved' %}<span class="pill green">Approved · not sent</span>
+{% elif draft.status=='ready_for_review' %}<span class="pill green">Ready for approval</span>
+{% elif draft_placeholders %}<span class="pill amber">{{draft_placeholders|length}} business answer{% if draft_placeholders|length != 1 %}s{% endif %} needed</span>
+{% else %}<span class="pill blue">Draft</span>{% endif %}
+<span class="small">Generated with {{draft.model}}</span>
+</div>
+
+{% if draft_placeholders %}
+<div class="notice" style="margin-top:14px"><b>Quick business answers</b><div class="small" style="margin-top:5px">Give the facts only. The assistant will write them naturally into the finished reply.</div></div>
+<form method="post" action="/draft/{{draft.id}}/complete" style="margin-top:14px">
+{% for item in draft_placeholders %}
+<div class="field">
+<label>{{loop.index}}. {{item.label}}</label>
+<input name="answer_{{loop.index0}}" autocomplete="off" placeholder="Type the business answer…" required>
+</div>
+{% endfor %}
+<button class="btn primary" type="submit">Build finished reply</button>
+</form>
+{% endif %}
+
+<form method="post" action="/draft/{{draft.id}}/save" style="margin-top:16px">
+<div class="field"><label>{% if draft_placeholders %}Working draft{% else %}Finished reply{% endif %}</label><textarea name="body" style="min-height:260px">{{draft.body}}</textarea></div>
+<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><button class="btn" type="submit">Save edits</button><span class="small">Still not sent</span></div>
+</form>
+
+{% if not draft_placeholders and draft.status!='approved' %}
+<form method="post" action="/draft/{{draft.id}}/approve" style="margin-top:12px">
+<button class="btn primary" type="submit">Approve reply</button>
+<span class="small" style="margin-left:8px">Approval records your decision; it does not send the email.</span>
+</form>
+{% endif %}
+{% else %}
+<div class="sub" style="margin-top:14px">Generate a draft after reviewing the customer questions. If the assistant needs a price, date or scope decision, it will ask you here instead of guessing.</div>
+{% endif %}
 </div>
 
 {% if latest_analysis %}<div class="card" style="margin-top:18px"><h2>Latest message analysis</h2><p><b>Intent:</b> {{latest_analysis.customer_intent|replace('_',' ')|title}}<br><b>Sentiment:</b> {{latest_analysis.sentiment|title}}</p>
