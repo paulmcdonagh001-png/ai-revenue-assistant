@@ -483,7 +483,7 @@ Rules:
 
         return analysis
     except Exception as exc:
-        app.logger.exception("AI analyst call failed: %s", exc)
+        app.logger.error("AI analyst call failed: %s", type(exc).__name__)
         fallback["analysis_source"] = "rules_fallback"
         fallback["summary"] = f"{fallback['summary']} (AI fallback)"
         return fallback
