@@ -1,0 +1,22 @@
+{% extends "layout.html" %}{% block content %}
+<h1>AI Analyst Lab</h1>
+<div class="sub">Test realistic customer wording without changing the customer database.</div>
+{% if not ai_ready %}<div class="warn" style="margin-top:16px"><b>AI API not connected yet.</b> The lab will currently show the simple rules fallback. Once <code>OPENAI_API_KEY</code> is added, this screen uses {{model}} with structured output.</div>{% else %}<div class="notice" style="margin-top:16px"><b>AI ready:</b> {{model}}</div>{% endif %}
+<div class="grid2" style="margin-top:18px">
+<form class="card" method="post">
+<div class="field"><label>Quote value</label><input name="quote_value" type="number" value="{{quote_value}}"></div>
+<div class="field"><label>Subject</label><input name="subject" value="{{subject}}"></div>
+<div class="field"><label>Customer email</label><textarea name="body" style="min-height:260px">{{body}}</textarea></div>
+<button class="btn primary" type="submit">Analyse message</button>
+</form>
+<div class="card"><h2>Commercial interpretation</h2>
+{% if result %}
+<p><span class="pill {% if result.opportunity_status=='Needs you' %}red{% elif result.opportunity_status=='Accepted' %}green{% else %}amber{% endif %}">{{result.opportunity_status}}</span> <span class="pill blue">{{(result.confidence*100)|round|int}}%</span></p>
+<p><b>{{result.summary}}</b></p>
+<p><b>Intent:</b> {{result.customer_intent|replace('_',' ')|title}}<br><b>Next action:</b> {{result.next_action}}<br><b>Human required:</b> {{'Yes' if result.human_required else 'No'}}<br><b>Source:</b> {{result.analysis_source}}</p>
+{% if result.questions %}<h3>Questions</h3>{% for q in result.questions %}<div class="question"><b>{{q.question}}</b><div class="small">{{q.category}} · {{(q.confidence*100)|round|int}}% · {% if q.requires_human %}human needed{% else %}low-risk{% endif %}</div></div>{% endfor %}{% endif %}
+{% if result.dependencies %}<h3>Dependencies</h3>{% for d in result.dependencies %}<div class="question">{{d.description}}<div class="small">{{d.owner|replace('_',' ')}}</div></div>{% endfor %}{% endif %}
+{% if result.actions %}<h3>Actions</h3>{% for a in result.actions %}<div class="action"><b>{{a.description}}</b><div class="small">{{a.owner}} · {{a.priority}} · {{a.category}}</div></div>{% endfor %}{% endif %}
+{% else %}<p class="sub">Run the sample email to see the extracted intent, questions, dependencies and actions.</p>{% endif %}
+</div></div>
+{% endblock %}
