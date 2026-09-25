@@ -1,0 +1,51 @@
+{% extends "layout.html" %}{% block content %}
+<a class="btn" href="/">← Morning Brief</a>
+<h1>Business Brain</h1>
+<div class="sub">Teach the assistant your normal business rules once. These are treated as verified owner-supplied facts, not guesses from customer emails.</div>
+
+{% if message %}<div class="notice" style="margin-top:16px">{{message}}</div>{% endif %}
+
+<div class="card" style="margin-top:18px">
+<div style="display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap">
+<div><h2 style="margin:0">Business knowledge</h2><div class="small">Fill what you know now. Blank fields remain unknown and the AI will still ask you when necessary.</div></div>
+<span class="pill {% if score >= 75 %}green{% elif score >= 40 %}amber{% else %}blue{% endif %}">{{score}}% core setup</span>
+</div>
+
+<form method="post" style="margin-top:18px">
+<div class="grid2">
+<div>
+<h3>Who you are</h3>
+<div class="field"><label>Business name</label><input name="business_name" value="{{profile.business_name}}" placeholder="e.g. Green Oak Landscaping"></div>
+<div class="field"><label>Name used to sign replies</label><input name="reply_from_name" value="{{profile.reply_from_name}}" placeholder="e.g. Paul"></div>
+<div class="field"><label>Service area</label><textarea name="service_area" placeholder="e.g. Sevenoaks and surrounding areas within 20 miles">{{profile.service_area}}</textarea></div>
+<div class="field"><label>Working / contact hours</label><textarea name="working_hours" placeholder="e.g. Mon–Fri 8am–5pm; Saturday mornings by appointment">{{profile.working_hours}}</textarea></div>
+
+<h3>Money</h3>
+<div class="field"><label>Deposit terms</label><textarea name="deposit_terms" placeholder="e.g. 30% deposit once the customer confirms they want to proceed">{{profile.deposit_terms}}</textarea></div>
+<div class="field"><label>Payment terms</label><textarea name="payment_terms" placeholder="e.g. balance due on completion by bank transfer">{{profile.payment_terms}}</textarea></div>
+<div class="field"><label>Normal price / discount policy</label><textarea name="price_policy" placeholder="e.g. quoted prices are normally final; any discount must be approved by the owner">{{profile.price_policy}}</textarea></div>
+</div>
+
+<div>
+<h3>Jobs & scheduling</h3>
+<div class="field"><label>Typical lead time</label><textarea name="standard_lead_time" placeholder="e.g. usually 2–4 weeks after approval, subject to availability">{{profile.standard_lead_time}}</textarea></div>
+<div class="field"><label>Scheduling rules</label><textarea name="scheduling_notes" placeholder="e.g. never promise an exact start date until the diary has been checked">{{profile.scheduling_notes}}</textarea></div>
+<div class="field"><label>Things normally included</label><textarea name="scope_inclusions" placeholder="e.g. removal of old paving, waste disposal and final clean-down where listed in the quote">{{profile.scope_inclusions}}</textarea></div>
+<div class="field"><label>Things normally excluded</label><textarea name="scope_exclusions" placeholder="e.g. planning fees, electrical work and unforeseen ground repairs unless quoted">{{profile.scope_exclusions}}</textarea></div>
+
+<h3>Customer promises</h3>
+<div class="field"><label>Guarantee / warranty policy</label><textarea name="guarantee_policy" placeholder="Only enter what you are happy for the AI to state to customers">{{profile.guarantee_policy}}</textarea></div>
+<div class="field"><label>Cancellation / change policy</label><textarea name="cancellation_policy" placeholder="e.g. scope changes are re-priced before work continues">{{profile.cancellation_policy}}</textarea></div>
+<div class="field"><label>Preferred reply tone</label><textarea name="tone_notes" placeholder="e.g. friendly, brief and straightforward; no pushy sales language">{{profile.tone_notes}}</textarea></div>
+<div class="field"><label>Other standing rules</label><textarea name="other_rules" placeholder="Anything else the assistant can safely rely on every time">{{profile.other_rules}}</textarea></div>
+</div>
+</div>
+
+<div class="notice" style="margin:8px 0 16px">
+<b>Safety rule:</b> saved company policy can be used automatically, but one-off discounts, exact availability, bespoke technical decisions and exceptions still come back to you.
+</div>
+
+<button class="btn primary" type="submit">Save Business Brain</button>
+</form>
+</div>
+{% endblock %}
