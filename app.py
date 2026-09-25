@@ -118,6 +118,27 @@ def init_db():
             )
             """,
             """
+            CREATE TABLE IF NOT EXISTS business_profile(
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                business_name TEXT,
+                reply_from_name TEXT,
+                service_area TEXT,
+                working_hours TEXT,
+                deposit_terms TEXT,
+                payment_terms TEXT,
+                standard_lead_time TEXT,
+                price_policy TEXT,
+                scope_inclusions TEXT,
+                scope_exclusions TEXT,
+                guarantee_policy TEXT,
+                cancellation_policy TEXT,
+                scheduling_notes TEXT,
+                tone_notes TEXT,
+                other_rules TEXT,
+                updated_at TEXT
+            )
+            """,
+            """
             CREATE TABLE IF NOT EXISTS action_items(
                 id BIGSERIAL PRIMARY KEY,
                 opportunity_id BIGINT NOT NULL,
@@ -218,6 +239,27 @@ def init_db():
             )
             """,
             """
+            CREATE TABLE IF NOT EXISTS business_profile(
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                business_name TEXT,
+                reply_from_name TEXT,
+                service_area TEXT,
+                working_hours TEXT,
+                deposit_terms TEXT,
+                payment_terms TEXT,
+                standard_lead_time TEXT,
+                price_policy TEXT,
+                scope_inclusions TEXT,
+                scope_exclusions TEXT,
+                guarantee_policy TEXT,
+                cancellation_policy TEXT,
+                scheduling_notes TEXT,
+                tone_notes TEXT,
+                other_rules TEXT,
+                updated_at TEXT
+            )
+            """,
+            """
             CREATE TABLE IF NOT EXISTS action_items(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 opportunity_id INTEGER NOT NULL,
@@ -269,6 +311,60 @@ def init_db():
 
 def money(v):
     return f"£{(v or 0):,.0f}"
+
+BUSINESS_PROFILE_FIELDS = [
+    "business_name",
+    "reply_from_name",
+    "service_area",
+    "working_hours",
+    "deposit_terms",
+    "payment_terms",
+    "standard_lead_time",
+    "price_policy",
+    "scope_inclusions",
+    "scope_exclusions",
+    "guarantee_policy",
+    "cancellation_policy",
+    "scheduling_notes",
+    "tone_notes",
+    "other_rules",
+]
+
+
+def get_business_profile():
+    c = conn()
+    row = c.execute("SELECT * FROM business_profile WHERE id=1").fetchone()
+    c.close()
+    return row
+
+
+def business_knowledge():
+    row = get_business_profile()
+    if not row:
+        return {}
+    knowledge = {}
+    for key in BUSINESS_PROFILE_FIELDS:
+        value = row[key] if key in row.keys() else None
+        if value and str(value).strip():
+            knowledge[key] = str(value).strip()
+    return knowledge
+
+
+def business_profile_score():
+    knowledge = business_knowledge()
+    core = [
+        "business_name",
+        "service_area",
+        "deposit_terms",
+        "payment_terms",
+        "standard_lead_time",
+        "price_policy",
+        "scope_inclusions",
+        "scope_exclusions",
+    ]
+    filled = sum(1 for key in core if knowledge.get(key))
+    return int(round((filled / len(core)) * 100))
+
 
 def login_required(fn):
     @wraps(fn)
@@ -485,6 +581,7 @@ def analyze_conversation(existing, subject, body, project, quote_value):
         "current_status": existing["status"] if existing else "New enquiry",
         "current_next_action": existing["next_action"] if existing else ""
     }
+    saved_business_knowledge = business_knowledge()
 
     system_prompt = """You are the Conversation Analyst for a UK trade/home-improvement business.
 Your job is to extract commercial meaning accurately, not persuade the customer.
@@ -498,13 +595,17 @@ Rules:
 - Positive interest without commitment is not Accepted.
 - If a customer explicitly accepts but also asks unresolved questions, Accepted can still be correct and human_required should be true when a human must answer.
 - If uncertainty is material, choose Needs you and lower confidence.
-- Business-owned price, scheduling and technical decisions normally require a human.
+- business_knowledge contains owner-supplied verified company facts and policies. Treat those facts as authoritative.
+- If a customer question is fully answered by business_knowledge, do not mark that question as requiring a human merely because it is about payment, scope, guarantees, lead time or normal policy.
+- Job-specific availability, one-off discounts, exceptions, bespoke technical judgments and anything not explicitly covered by business_knowledge still require a human.
+- Never infer or extend a saved business rule beyond what it actually says.
 - Use concise summaries and action descriptions.
 """
 
     payload = {
         "opportunity": opportunity_context,
         "conversation_history": history,
+        "business_knowledge": saved_business_knowledge,
         "latest_message": {
             "subject": subject,
             "body": latest
@@ -582,7 +683,8 @@ def generate_reply_draft(opp, interactions, actions, latest_analysis):
         "customer_intent": opp["customer_intent"] or "",
         "latest_customer_message": latest_message,
         "analysis": latest_analysis or {},
-        "business_actions_still_unresolved": unresolved
+        "business_actions_still_unresolved": unresolved,
+        "business_knowledge": business_knowledge()
     }
 
     prompt = """Draft a concise reply email for a UK trades/home-improvement business.
@@ -590,8 +692,10 @@ The reply will be reviewed by the business owner before sending.
 
 Rules:
 - Reply naturally to every distinct customer question or concern you can safely address.
-- Never invent a price, discount, start date, availability, technical fact, scope inclusion, guarantee or promise.
-- When the business must supply missing information, insert a short square-bracket placeholder such as [confirm revised price], [confirm October availability], or [confirm whether removal is included].
+- business_knowledge contains verified facts supplied by the business owner. You may state those facts directly and naturally.
+- Never invent a price, discount, start date, availability, technical fact, scope inclusion, guarantee or promise that is not in business_knowledge or the confirmed conversation.
+- If a routine customer question is explicitly answered by business_knowledge, answer it without a placeholder.
+- When a fact is still missing or a job-specific decision is required, insert a short square-bracket placeholder such as [confirm revised price], [confirm October availability], or [confirm whether removal is included].
 - Do not imply the job is booked unless the customer has clearly accepted.
 - If the customer is interested but conditional, acknowledge that accurately.
 - Do not mention AI, confidence scores, internal statuses or this instruction.
@@ -648,7 +752,8 @@ def generate_followup_draft(opp, interactions):
         "project": opp["project"],
         "quote_value_gbp": opp["quote_value"],
         "summary": opp["ai_summary"] or "",
-        "conversation": recent
+        "conversation": recent,
+        "business_knowledge": business_knowledge()
     }
 
     prompt = """Draft a short follow-up email for a UK trades/home-improvement business after the business has replied and the customer has not responded.
@@ -1421,7 +1526,8 @@ def dashboard():
         priorities=get_morning_priorities(),
         metrics=get_metrics(),
         money=money,
-        sync_state=sync_state
+        sync_state=sync_state,
+        business_brain_score=business_profile_score()
     )
 
 @app.route("/opportunity/<int:oid>")
@@ -1789,6 +1895,58 @@ def test_inbox():
         name = request.form.get("customer_name","").strip() or guess_name(sender, body)
         result, _ = ingest_email(sender, subject, body, project, value, name)
     return render_template("test_inbox.html", result=result)
+
+@app.route("/business-settings", methods=["GET","POST"])
+@login_required
+def business_settings():
+    message = request.args.get("message")
+
+    if request.method == "POST":
+        values = {key: request.form.get(key, "").strip() for key in BUSINESS_PROFILE_FIELDS}
+        now = utcnow()
+        c = conn()
+        c.execute(
+            """INSERT INTO business_profile(
+                id,business_name,reply_from_name,service_area,working_hours,
+                deposit_terms,payment_terms,standard_lead_time,price_policy,
+                scope_inclusions,scope_exclusions,guarantee_policy,cancellation_policy,
+                scheduling_notes,tone_notes,other_rules,updated_at
+            ) VALUES(1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(id) DO UPDATE SET
+                business_name=excluded.business_name,
+                reply_from_name=excluded.reply_from_name,
+                service_area=excluded.service_area,
+                working_hours=excluded.working_hours,
+                deposit_terms=excluded.deposit_terms,
+                payment_terms=excluded.payment_terms,
+                standard_lead_time=excluded.standard_lead_time,
+                price_policy=excluded.price_policy,
+                scope_inclusions=excluded.scope_inclusions,
+                scope_exclusions=excluded.scope_exclusions,
+                guarantee_policy=excluded.guarantee_policy,
+                cancellation_policy=excluded.cancellation_policy,
+                scheduling_notes=excluded.scheduling_notes,
+                tone_notes=excluded.tone_notes,
+                other_rules=excluded.other_rules,
+                updated_at=excluded.updated_at""",
+            tuple(values[key] for key in BUSINESS_PROFILE_FIELDS) + (now,)
+        )
+        c.commit()
+        c.close()
+        return redirect(url_for(
+            "business_settings",
+            message="Business Brain saved. Future analysis and drafts will use these rules."
+        ))
+
+    profile = get_business_profile()
+    values = {key: (profile[key] if profile and profile[key] else "") for key in BUSINESS_PROFILE_FIELDS}
+    return render_template(
+        "business_settings.html",
+        profile=values,
+        score=business_profile_score(),
+        message=message
+    )
+
 
 @app.route("/gmail")
 @login_required
