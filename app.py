@@ -23,7 +23,10 @@ SQLITE_PATH = os.getenv("DATABASE_PATH", "revenue_assistant.db")
 USE_POSTGRES = DATABASE_URL.startswith("postgres")
 BASE_URL = os.getenv("BASE_URL", "http://localhost:5000").rstrip("/")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+
+STATUS_VALUES = ["New enquiry", "Considering", "Needs you", "Ready to send", "Accepted", "Lost", "Dormant"]
 
 def utcnow():
     return datetime.now(timezone.utc).isoformat()
@@ -102,10 +105,31 @@ def init_db():
                 opportunity_id BIGINT,
                 processed_at TEXT NOT NULL
             )
+            """,
             """
+            CREATE TABLE IF NOT EXISTS action_items(
+                id BIGSERIAL PRIMARY KEY,
+                opportunity_id BIGINT NOT NULL,
+                interaction_id BIGINT,
+                category TEXT NOT NULL,
+                description TEXT NOT NULL,
+                owner TEXT NOT NULL,
+                priority TEXT NOT NULL,
+                confidence DOUBLE PRECISION DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'open',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(opportunity_id) REFERENCES opportunities(id),
+                FOREIGN KEY(interaction_id) REFERENCES interactions(id)
+            )
+            """,
+            "ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS ai_summary TEXT",
+            "ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS customer_intent TEXT",
+            "ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS confidence DOUBLE PRECISION",
+            "ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS human_required BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE opportunities ADD COLUMN IF NOT EXISTS analysis_source TEXT",
+            "ALTER TABLE interactions ADD COLUMN IF NOT EXISTS latest_text TEXT",
+            "ALTER TABLE interactions ADD COLUMN IF NOT EXISTS analysis_json TEXT"
         ]
-        for statement in statements:
-            c.execute(statement)
     else:
         statements = [
             """
@@ -120,7 +144,12 @@ def init_db():
                 objection TEXT,
                 next_action TEXT,
                 last_contact TEXT,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                ai_summary TEXT,
+                customer_intent TEXT,
+                confidence REAL,
+                human_required INTEGER DEFAULT 0,
+                analysis_source TEXT
             )
             """,
             """
@@ -133,6 +162,8 @@ def init_db():
                 body TEXT NOT NULL,
                 classification TEXT,
                 created_at TEXT NOT NULL,
+                latest_text TEXT,
+                analysis_json TEXT,
                 FOREIGN KEY(opportunity_id) REFERENCES opportunities(id)
             )
             """,
@@ -150,10 +181,30 @@ def init_db():
                 opportunity_id INTEGER,
                 processed_at TEXT NOT NULL
             )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS action_items(
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                opportunity_id INTEGER NOT NULL,
+                interaction_id INTEGER,
+                category TEXT NOT NULL,
+                description TEXT NOT NULL,
+                owner TEXT NOT NULL,
+                priority TEXT NOT NULL,
+                confidence REAL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'open',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(opportunity_id) REFERENCES opportunities(id),
+                FOREIGN KEY(interaction_id) REFERENCES interactions(id)
+            )
             """
         ]
-        for statement in statements:
+    for statement in statements:
+        try:
             c.execute(statement)
+        except Exception:
+            if USE_POSTGRES:
+                raise
     c.commit()
     c.close()
 
@@ -185,7 +236,6 @@ def newest_message_text(body):
 def classify_email(subject, body):
     fresh = newest_message_text(body)
     text = f"{subject} {fresh}".lower()
-
     classification = "General reply"
     status = "Considering"
     objection = None
@@ -231,11 +281,211 @@ def classify_email(subject, body):
         status = "Needs you"
         objection = "Price objection"
         next_action = "Respond to price concern"
-    elif any(x in text for x in ["quote","quotation","estimate"]) and any(x in text for x in ["received","thanks","thank you"]):
-        classification = "Quote acknowledged"
-        status = "Considering"
-        next_action = "Watch / follow up later"
     return classification, status, objection, next_action
+
+def rules_analysis(subject, body):
+    classification, status, objection, next_action = classify_email(subject, body)
+    category = "other"
+    if objection == "Price objection":
+        category = "price"
+    elif objection == "Scheduling question":
+        category = "schedule"
+    return {
+        "summary": classification,
+        "customer_intent": "accepted" if status == "Accepted" else ("declined" if status == "Lost" else "unclear"),
+        "opportunity_status": status,
+        "confidence": 0.55,
+        "human_required": status == "Needs you",
+        "primary_objection": category if category != "other" else "none",
+        "next_action": next_action,
+        "sentiment": "neutral",
+        "questions": [],
+        "dependencies": [],
+        "actions": [{
+            "description": next_action,
+            "owner": "business",
+            "priority": "high" if status == "Needs you" else "medium",
+            "category": category,
+            "confidence": 0.55
+        }],
+        "commercial_signals": [classification],
+        "analysis_source": "rules"
+    }
+
+def openai_configured():
+    return bool(os.getenv("OPENAI_API_KEY"))
+
+ANALYSIS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "customer_intent": {
+            "type": "string",
+            "enum": ["new_enquiry","considering","conditional_interest","wants_to_proceed","accepted","declined","deferred","unclear"]
+        },
+        "opportunity_status": {
+            "type": "string",
+            "enum": STATUS_VALUES
+        },
+        "confidence": {"type": "number"},
+        "human_required": {"type": "boolean"},
+        "primary_objection": {
+            "type": "string",
+            "enum": ["none","price","schedule","technical","scope","payment","access","competitor","trust","other"]
+        },
+        "next_action": {"type": "string"},
+        "sentiment": {
+            "type": "string",
+            "enum": ["positive","neutral","concerned","frustrated","negative"]
+        },
+        "questions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string"},
+                    "category": {"type": "string", "enum": ["price","schedule","technical","scope","payment","access","other"]},
+                    "requires_human": {"type": "boolean"},
+                    "confidence": {"type": "number"}
+                },
+                "required": ["question","category","requires_human","confidence"],
+                "additionalProperties": False
+            }
+        },
+        "dependencies": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string"},
+                    "owner": {"type": "string", "enum": ["customer","business","third_party","unknown"]},
+                    "confidence": {"type": "number"}
+                },
+                "required": ["description","owner","confidence"],
+                "additionalProperties": False
+            }
+        },
+        "actions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string"},
+                    "owner": {"type": "string", "enum": ["business","customer","system"]},
+                    "priority": {"type": "string", "enum": ["high","medium","low"]},
+                    "category": {"type": "string", "enum": ["price","schedule","technical","scope","payment","access","follow_up","other"]},
+                    "confidence": {"type": "number"}
+                },
+                "required": ["description","owner","priority","category","confidence"],
+                "additionalProperties": False
+            }
+        },
+        "commercial_signals": {
+            "type": "array",
+            "items": {"type": "string"}
+        }
+    },
+    "required": [
+        "summary","customer_intent","opportunity_status","confidence","human_required",
+        "primary_objection","next_action","sentiment","questions","dependencies",
+        "actions","commercial_signals"
+    ],
+    "additionalProperties": False
+}
+
+def get_recent_history(opportunity_id, limit=6):
+    if not opportunity_id:
+        return []
+    c = conn()
+    rows = c.execute(
+        "SELECT created_at, classification, body FROM interactions WHERE opportunity_id=? ORDER BY created_at DESC LIMIT ?",
+        (opportunity_id, limit)
+    ).fetchall()
+    c.close()
+    result = []
+    for row in reversed(rows):
+        result.append({
+            "date": row["created_at"],
+            "classification": row["classification"] or "",
+            "message": newest_message_text(row["body"])[:1200]
+        })
+    return result
+
+def analyze_conversation(existing, subject, body, project, quote_value):
+    fallback = rules_analysis(subject, body)
+    if not openai_configured():
+        fallback["analysis_source"] = "rules_no_api_key"
+        return fallback
+
+    latest = newest_message_text(body)
+    history = get_recent_history(existing["id"] if existing else None)
+    opportunity_context = {
+        "customer_name": existing["customer_name"] if existing else "",
+        "project": existing["project"] if existing else project,
+        "quote_value_gbp": existing["quote_value"] if existing and existing["quote_value"] else quote_value,
+        "current_status": existing["status"] if existing else "New enquiry",
+        "current_next_action": existing["next_action"] if existing else ""
+    }
+
+    system_prompt = """You are the Conversation Analyst for a UK trade/home-improvement business.
+Your job is to extract commercial meaning accurately, not persuade the customer.
+
+Rules:
+- The field latest_message is the customer's newest text and is authoritative for their current intent.
+- conversation_history is context only. Do not mistake older quoted concerns for the current message.
+- Extract every distinct question, objection, dependency and required action. A single email can contain many.
+- Never invent a price, date, technical answer, promise, discount or commitment.
+- Mark Accepted only when the latest message explicitly or unambiguously commits to proceeding.
+- Positive interest without commitment is not Accepted.
+- If a customer explicitly accepts but also asks unresolved questions, Accepted can still be correct and human_required should be true when a human must answer.
+- If uncertainty is material, choose Needs you and lower confidence.
+- Business-owned price, scheduling and technical decisions normally require a human.
+- Use concise summaries and action descriptions.
+"""
+
+    payload = {
+        "opportunity": opportunity_context,
+        "conversation_history": history,
+        "latest_message": {
+            "subject": subject,
+            "body": latest
+        }
+    }
+
+    try:
+        from openai import OpenAI
+        client = OpenAI()
+        response = client.responses.create(
+            model=OPENAI_MODEL,
+            input=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}
+            ],
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "trade_conversation_analysis",
+                    "strict": True,
+                    "schema": ANALYSIS_SCHEMA
+                }
+            },
+            max_output_tokens=1800
+        )
+        analysis = json.loads(response.output_text)
+        analysis["analysis_source"] = f"openai:{OPENAI_MODEL}"
+
+        confidence = float(analysis.get("confidence", 0))
+        if confidence < 0.65 and analysis.get("opportunity_status") not in ["Accepted", "Lost"]:
+            analysis["opportunity_status"] = "Needs you"
+            analysis["human_required"] = True
+            if not analysis.get("next_action"):
+                analysis["next_action"] = "Review customer message"
+
+        return analysis
+    except Exception as exc:
+        fallback["analysis_source"] = "rules_fallback"
+        fallback["summary"] = f"{fallback['summary']} (AI fallback)"
+        return fallback
 
 def guess_name(email_addr, body=""):
     local = (email_addr or "customer").split("@")[0]
@@ -263,11 +513,11 @@ def get_metrics():
     needs = sum((r["quote_value"] or 0) for r in rows if r["status"]=="Needs you")
     ready = sum((r["quote_value"] or 0) for r in rows if r["status"]=="Ready to send")
     accepted = sum((r["quote_value"] or 0) for r in rows if r["status"]=="Accepted")
+    open_actions = c.execute("SELECT COUNT(*) n FROM action_items WHERE status='open' AND owner='business'").fetchone()["n"]
     c.close()
-    return {"open": total, "needs": needs, "ready": ready, "accepted": accepted}
+    return {"open": total, "needs": needs, "ready": ready, "accepted": accepted, "open_actions": open_actions}
 
 def ingest_email(sender, subject, body, project="Email enquiry", quote_value=0, name=None, external_id=None):
-    classification, status, objection, next_action = classify_email(subject, body)
     name = name or guess_name(sender, body)
     now = utcnow()
     c = conn()
@@ -282,33 +532,69 @@ def ingest_email(sender, subject, body, project="Email enquiry", quote_value=0, 
         "SELECT * FROM opportunities WHERE lower(customer_email)=lower(?) ORDER BY id DESC LIMIT 1",
         (sender,)
     ).fetchone()
+    c.close()
 
+    analysis = analyze_conversation(existing, subject, body, project, quote_value)
+    status = analysis["opportunity_status"]
+    objection = None if analysis["primary_objection"] == "none" else analysis["primary_objection"].replace("_"," ").title()
+    next_action = analysis["next_action"]
+    classification = analysis["summary"][:180]
+    latest_text = newest_message_text(body)
+
+    c = conn()
     if existing:
         oid = existing["id"]
         c.execute(
             """UPDATE opportunities
                SET status=?, objection=?, next_action=?, last_contact=?,
                    quote_value=CASE WHEN ? > 0 THEN ? ELSE quote_value END,
-                   project=CASE WHEN project='Email enquiry' OR project LIKE '[ARA TEST]%' THEN ? ELSE project END
+                   project=CASE WHEN project='Email enquiry' OR project LIKE '[ARA TEST]%' THEN ? ELSE project END,
+                   ai_summary=?, customer_intent=?, confidence=?, human_required=?, analysis_source=?
                WHERE id=?""",
-            (status, objection, next_action, now[:10], quote_value, quote_value, project, oid)
+            (
+                status, objection, next_action, now[:10],
+                quote_value, quote_value, project,
+                analysis["summary"], analysis["customer_intent"], float(analysis["confidence"]),
+                bool(analysis["human_required"]), analysis["analysis_source"], oid
+            )
         )
     else:
         cur = c.execute(
             """INSERT INTO opportunities
-               (customer_name,customer_email,project,location,quote_value,status,objection,next_action,last_contact,created_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?)
+               (customer_name,customer_email,project,location,quote_value,status,objection,next_action,last_contact,created_at,
+                ai_summary,customer_intent,confidence,human_required,analysis_source)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                RETURNING id""",
-            (name, sender, project, "", quote_value, status, objection, next_action, now[:10], now)
+            (
+                name, sender, project, "", quote_value, status, objection, next_action, now[:10], now,
+                analysis["summary"], analysis["customer_intent"], float(analysis["confidence"]),
+                bool(analysis["human_required"]), analysis["analysis_source"]
+            )
         )
         oid = cur.fetchone()["id"]
 
-    c.execute(
+    cur = c.execute(
         """INSERT INTO interactions
-           (opportunity_id,direction,channel,subject,body,classification,created_at)
-           VALUES(?,?,?,?,?,?,?)""",
-        (oid, "inbound", "email", subject, body, classification, now)
+           (opportunity_id,direction,channel,subject,body,classification,created_at,latest_text,analysis_json)
+           VALUES(?,?,?,?,?,?,?,?,?)
+           RETURNING id""",
+        (
+            oid, "inbound", "email", subject, body, classification, now,
+            latest_text, json.dumps(analysis, ensure_ascii=False)
+        )
     )
+    interaction_id = cur.fetchone()["id"]
+
+    for item in analysis.get("actions", []):
+        c.execute(
+            """INSERT INTO action_items
+               (opportunity_id,interaction_id,category,description,owner,priority,confidence,status,created_at)
+               VALUES(?,?,?,?,?,?,?,?,?)""",
+            (
+                oid, interaction_id, item["category"], item["description"],
+                item["owner"], item["priority"], float(item["confidence"]), "open", now
+            )
+        )
 
     if external_id:
         c.execute(
@@ -322,7 +608,8 @@ def ingest_email(sender, subject, body, project="Email enquiry", quote_value=0, 
         "classification": classification,
         "status": status,
         "next_action": next_action,
-        "opportunity_id": oid
+        "opportunity_id": oid,
+        "analysis": analysis
     }, "created"
 
 def google_configured():
@@ -428,10 +715,49 @@ def opportunity(oid):
         "SELECT * FROM interactions WHERE opportunity_id=? ORDER BY created_at DESC",
         (oid,)
     ).fetchall()
+    actions = c.execute(
+        "SELECT * FROM action_items WHERE opportunity_id=? AND status='open' ORDER BY CASE priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, id DESC",
+        (oid,)
+    ).fetchall()
     c.close()
     if not opp:
         return "Not found", 404
-    return render_template("opportunity.html", opp=opp, interactions=interactions, money=money)
+
+    latest_analysis = None
+    if interactions and interactions[0]["analysis_json"]:
+        try:
+            latest_analysis = json.loads(interactions[0]["analysis_json"])
+        except Exception:
+            latest_analysis = None
+
+    return render_template(
+        "opportunity.html",
+        opp=opp,
+        interactions=interactions,
+        actions=actions,
+        latest_analysis=latest_analysis,
+        money=money
+    )
+
+@app.route("/analyst-lab", methods=["GET","POST"])
+@login_required
+def analyst_lab():
+    result = None
+    sample = """Thanks again for coming round last week. We really like the design and we're keen to get it done. It is a bit more than we originally budgeted though. Would there be any saving if we left out the raised beds? Also, could you start around the middle of October, and does the quote include taking the old paving away? We need to check with our neighbour about access, but assuming that's okay we'd like to move forward."""
+    subject = request.form.get("subject", "Patio quotation") if request.method == "POST" else "Patio quotation"
+    body = request.form.get("body", sample) if request.method == "POST" else sample
+    quote_value = float(request.form.get("quote_value") or 8450) if request.method == "POST" else 8450
+    if request.method == "POST":
+        result = analyze_conversation(None, subject, body, subject, quote_value)
+    return render_template(
+        "analyst_lab.html",
+        result=result,
+        subject=subject,
+        body=body,
+        quote_value=quote_value,
+        ai_ready=openai_configured(),
+        model=OPENAI_MODEL
+    )
 
 @app.route("/test-inbox", methods=["GET","POST"])
 @login_required
@@ -459,7 +785,9 @@ def gmail_page():
         configured=google_configured(),
         connection=row,
         processed=count,
-        message=request.args.get("message")
+        message=request.args.get("message"),
+        ai_ready=openai_configured(),
+        model=OPENAI_MODEL
     )
 
 @app.route("/gmail/connect")
@@ -596,7 +924,9 @@ def health():
     return jsonify({
         "status": "ok",
         "database": "postgres" if USE_POSTGRES else "sqlite",
-        "google_configured": google_configured()
+        "google_configured": google_configured(),
+        "ai_configured": openai_configured(),
+        "ai_model": OPENAI_MODEL
     })
 
 if __name__ == "__main__":
