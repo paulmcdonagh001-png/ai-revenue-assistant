@@ -1,3 +1,4 @@
+import secrets
 
 import os
 import re
@@ -25,6 +26,7 @@ USE_POSTGRES = DATABASE_URL.startswith("postgres")
 BASE_URL = os.getenv("BASE_URL", "http://localhost:5000").rstrip("/")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6-luna")
+AUTO_SYNC_KEY = os.getenv("AUTO_SYNC_KEY", "")
 GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 GMAIL_SCOPES = [GMAIL_READ_SCOPE, GMAIL_SEND_SCOPE]
@@ -1710,6 +1712,27 @@ def gmail_sync():
         "gmail_page",
         message=f"Sync complete: {result['created']} new messages ingested, {result['duplicates']} already seen, {result['skipped']} skipped."
     ))
+
+@app.route("/internal/auto-sync", methods=["POST"])
+def internal_auto_sync():
+    provided = request.headers.get("X-Auto-Sync-Key", "")
+    if not AUTO_SYNC_KEY or not secrets.compare_digest(provided, AUTO_SYNC_KEY):
+        return jsonify({"ok": False, "error": "forbidden"}), 403
+
+    try:
+        result = sync_test_gmail_messages()
+        if result.get("error"):
+            app.logger.error("AUTO_SYNC_FAILED reason=%s", result["error"])
+            return jsonify({"ok": False, **result}), 503
+        app.logger.warning(
+            "AUTO_SYNC_OK created=%s duplicates=%s skipped=%s",
+            result["created"], result["duplicates"], result["skipped"]
+        )
+        return jsonify({"ok": True, **result})
+    except Exception as exc:
+        app.logger.error("AUTO_SYNC_FAILED type=%s", type(exc).__name__)
+        return jsonify({"ok": False, "error": type(exc).__name__}), 500
+
 
 @app.route("/api/opportunities")
 @login_required
