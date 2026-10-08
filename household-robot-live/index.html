@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Household Robot Live Test</title>
+<meta name="theme-color" content="#0b1020">
+<style>
+:root{--bg:#0b1020;--panel:#121a2d;--panel2:#182239;--text:#f7f8fb;--muted:#aab3c4;--line:#293550;--accent:#9dd5ff;--good:#99e2b4;--warn:#ffd98e}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 system-ui,-apple-system,Segoe UI,Roboto,Arial}
+button,input,select{font:inherit}button{cursor:pointer}.app{max-width:760px;margin:auto;min-height:100vh;padding-bottom:88px}
+.top{position:sticky;top:0;z-index:20;background:rgba(11,16,32,.95);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);padding:14px 16px}
+.brand{display:flex;justify-content:space-between;align-items:center;gap:10px}.brand h1{font-size:18px;margin:0}.mini,.tiny{font-size:12px;color:var(--muted)}.small{font-size:14px}.muted{color:var(--muted)}
+main{padding:16px}.page{display:none}.page.active{display:block}.card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:14px}
+.card.soft{background:var(--panel2)}h2{font-size:24px;margin:0 0 5px}h3{font-size:17px;margin:0 0 8px}p{margin:6px 0}
+.grid{display:grid;gap:10px}.g3{grid-template-columns:repeat(3,minmax(0,1fr))}.metric{padding:13px;border:1px solid var(--line);border-radius:13px;background:var(--panel2)}.metric b{display:block;font-size:22px;margin-top:4px}
+.btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:11px;min-height:44px;padding:10px 14px}.btn.primary{background:var(--accent);color:#06111e;border-color:transparent;font-weight:700}.btn.sm{min-height:38px;padding:7px 10px;font-size:13px}
+.row{display:flex;justify-content:space-between;gap:12px;align-items:center}.list{border-top:1px solid var(--line);margin:12px -16px -16px}.item{padding:13px 16px;border-bottom:1px solid var(--line)}.item:last-child{border-bottom:0}
+.tag{display:inline-block;border:1px solid var(--line);border-radius:99px;padding:4px 8px;font-size:12px;color:var(--muted);margin:2px 4px 2px 0}
+.notice{border-left:4px solid var(--warn);padding:12px 14px;background:rgba(255,217,142,.08);border-radius:8px}.goodbox{border-left:4px solid var(--good);padding:12px 14px;background:rgba(153,226,180,.07);border-radius:8px}
+input,select{width:100%;min-height:44px;border:1px solid var(--line);border-radius:10px;background:#0d1425;color:var(--text);padding:10px}label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+.nav{position:fixed;bottom:0;left:0;right:0;z-index:30;background:rgba(11,16,32,.98);border-top:1px solid var(--line);display:flex;justify-content:center;padding-bottom:max(8px,env(safe-area-inset-bottom))}
+.navinner{display:grid;grid-template-columns:repeat(5,1fr);width:min(760px,100%)}.nav button{border:0;background:transparent;color:var(--muted);padding:10px 4px;font-size:11px;min-height:58px}.nav button.active{color:var(--text);font-weight:700}
+.bar{height:10px;background:#0a1120;border:1px solid var(--line);border-radius:99px;overflow:hidden}.bar>i{display:block;height:100%;background:var(--accent)}
+dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:16px;width:min(680px,calc(100% - 24px));padding:18px}dialog::backdrop{background:rgba(0,0,0,.65)}
+@media(max-width:560px){.g3{grid-template-columns:1fr 1fr}.row.mobile{align-items:stretch;flex-direction:column}}
+</style>
+</head>
+<body>
+<div class="app">
+<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
+<main>
+<section id="home" class="page active">
+<div class="card soft"><div class="tiny">LIVE TEST</div><h3>Your household is ready</h3><p class="small muted">2 adults, 2 dogs, no fixed shopping day, Tesco + Aldi. Your changes stay saved on this web address.</p></div>
+<div class="card"><div class="row"><div><div class="tiny">HOUSEHOLD UNDERSTANDING</div><h2 id="score">22%</h2></div><div style="width:48%"><div class="bar"><i id="scoreBar" style="width:22%"></i></div><div class="tiny" style="margin-top:6px">Benchmarks first, real shopping gradually takes over</div></div></div></div>
+<div class="grid g3" id="homeMetrics"></div>
+<div class="card"><div class="tiny">WHAT TO DO NEXT</div><h3 id="nextTitle">Use it on your next real shop</h3><p id="nextText" class="small muted">Open the Shopping Plan. The robot has already chosen what it thinks you need. Only correct obvious mistakes.</p><button class="btn primary" id="nextBtn">Open Shopping Plan</button></div>
+<div class="card"><h3>What I think is coming up</h3><div id="homePreview" class="list"></div></div>
+</section>
+
+<section id="plan" class="page">
+<h2>Shopping Plan</h2><p class="small muted">This is the robot's list, not a blank checklist for you to build.</p>
+<div class="card"><div class="notice small"><b>First-shop limitation:</b> I know the household model but not exactly what is in your cupboards today. If something is wrong, tap “Have plenty”. After real shops are recorded, this should need fewer corrections.</div></div>
+<div class="grid g3" id="planMetrics"></div>
+<div class="card"><div class="row"><div><h3>Recommended next shop</h3><div class="tiny">Everything below is included unless you correct it.</div></div><button class="btn sm" id="resetPlan">Reset corrections</button></div><div id="planList" class="list"></div></div>
+<div class="card"><button class="btn primary" style="width:100%" id="usePlan">Use this plan</button></div>
+</section>
+
+<section id="essentials" class="page">
+<h2>Household Essentials</h2><p class="small muted">Generated from your household profile. These become more specific as receipts and shops teach the robot.</p>
+<div class="card"><input id="search" placeholder="Search essentials"></div><div id="essentialGroups"></div>
+</section>
+
+<section id="record" class="page">
+<h2>Record Shop</h2><p class="small muted">This is how the robot learns what your household actually buys.</p>
+<div class="card">
+<h3>Receipt capture</h3>
+<div class="grid" style="grid-template-columns:1fr 1fr;gap:8px">
+<button class="btn" id="longScan"><b>Long receipt scan</b><br><span class="tiny">See how it will work</span></button>
+<button class="btn" id="photoBtn"><b>Take photo</b><br><span class="tiny">Short receipt</span></button>
+<button class="btn" id="uploadBtn" style="grid-column:1/-1"><b>Upload screenshot/order</b><br><span class="tiny">Supermarket app or online order</span></button>
+</div>
+<div id="receiptStatus" class="tiny" style="margin-top:10px"></div>
+<input id="photoInput" type="file" accept="image/*" capture="environment" hidden>
+<input id="uploadInput" type="file" accept="image/*,application/pdf" hidden>
+</div>
+<div class="card"><div class="row mobile"><div style="flex:1"><label>Shop</label><select id="store"></select></div><div style="flex:1"><label>Date</label><input id="shopDate" type="date"></div><div style="flex:1"><label>Total (£)</label><input id="shopTotal" type="number" step=".01" min="0"></div></div></div>
+<div class="card"><h3>Confirm what actually came home</h3><p class="tiny">If you arrived from Shopping Plan, planned items are preselected. Only correct the exceptions.</p><div id="recordList" class="list"></div><button class="btn primary" style="width:100%;margin-top:14px" id="saveShop">Save shop</button></div>
+<div class="card"><h3>Recent shops</h3><div id="history" class="list"></div></div>
+</section>
+
+<section id="household" class="page">
+<h2>Household</h2><div class="card" id="householdSummary"></div>
+<div class="card"><h3>Budget & shopping</h3><label>Weekly budget</label><input id="budget" type="number" min="1"><label style="margin-top:10px">Shopping pattern</label><select id="pattern"><option value="rolling">No fixed day / shop as needed</option><option value="several">Several smaller shops</option><option value="weekly">One main weekly shop</option></select><button class="btn primary" style="width:100%;margin-top:12px" id="saveSettings">Save</button></div>
+<div class="card"><h3>Data</h3><p class="tiny">This live test saves on this web address in your browser.</p><button class="btn" id="backup">Backup data</button></div>
+</section>
+</main>
+<nav class="nav"><div class="navinner">
+<button class="active" data-page="home">Home</button><button data-page="plan">Plan</button><button data-page="essentials">Essentials</button><button data-page="record">Record Shop</button><button data-page="household">Household</button>
+</div></nav>
+</div>
+
+<dialog id="tour">
+<h2>How to use this test</h2>
+<div class="goodbox small"><b>1. Home</b><br>See what the robot currently thinks needs attention.</div>
+<div class="goodbox small" style="margin-top:8px"><b>2. Shopping Plan</b><br>The robot builds the list. Only correct things it got wrong.</div>
+<div class="goodbox small" style="margin-top:8px"><b>3. Record Shop</b><br>After shopping, confirm what actually came home. This is what teaches it.</div>
+<div class="goodbox small" style="margin-top:8px"><b>4. Repeat</b><br>Real purchase cycles gradually replace the starting household averages.</div>
+<button class="btn primary" style="width:100%;margin-top:12px" onclick="tour.close()">Got it</button>
+</dialog>
+
+<dialog id="scanInfo">
+<h2>Long receipt scan</h2>
+<p class="small muted">The finished version will let you make one slow top-to-bottom camera sweep. The app will automatically keep sharp overlapping frames and read the whole receipt.</p>
+<div class="notice small"><b>Not active in this V0 yet.</b> For this live test, use a normal photo or upload a supermarket screenshot/order.</div>
+<button class="btn primary" style="width:100%;margin-top:12px" onclick="scanInfo.close()">Close</button>
+</dialog>
+
+<script>
+const KEY='householdRobotLiveV0';
+const shops=['Tesco','Aldi',"Sainsbury's",'Asda','Morrisons','Waitrose','Ocado','Lidl','Other'];
+const base=[
+['milk','Milk','Food & drink',7,'6 L/week'],['bread','Bread','Food & drink',7,'2 loaves/week'],['eggs','Eggs','Food & drink',8,'12/week'],['cheese','Cheese','Food & drink',12,'1 pack'],['butter','Butter/spreads','Food & drink',18,'1 pack'],['yoghurt','Yoghurt','Food & drink',7,'1 multipack'],['cereal','Cereal/oats','Food & drink',14,'1 box'],['coffee','Coffee','Food & drink',17,'1 jar/bag'],['tea','Tea','Food & drink',30,'1 box'],['squash','Squash/cordial','Food & drink',10,'2 bottles'],['rice','Rice','Food & drink',28,'1 pack'],['pasta','Pasta/noodles','Food & drink',21,'1 pack'],['potatoes','Potatoes','Food & drink',10,'1 bag'],['chicken','Chicken','Meat, fish & protein',7,'regular'],['beef','Beef','Meat, fish & protein',10,'regular'],['pork','Pork','Meat, fish & protein',10,'regular'],['lamb','Lamb','Meat, fish & protein',14,'occasional'],['turkey','Turkey','Meat, fish & protein',14,'occasional'],['fish','Fish','Meat, fish & protein',7,'regular'],['veggie','Vegetarian/vegan protein','Meat, fish & protein',10,'optional'],['fruit','Fresh fruit','Food & drink',7,'weekly'],['veg','Fresh vegetables','Food & drink',7,'weekly'],['frozen','Frozen food','Food & drink',14,'regular'],['tinned','Tinned goods','Food & drink',21,'regular'],['toilet','Toilet roll','Household',18,'9 rolls'],['kitchen','Kitchen roll','Household',21,'2 rolls'],['laundry','Laundry detergent/capsules','Household',24,'1 pack'],['dishwasher','Dishwasher tablets','Household',28,'1 pack'],['washingup','Washing-up liquid','Household',21,'1 bottle'],['bags','Bin bags','Household',28,'1 roll'],['cleaner','Cleaning spray','Household',28,'1 bottle'],['toothpaste','Toothpaste','Personal care',35,'1 tube'],['shampoo','Shampoo','Personal care',30,'1 bottle'],['shower','Shower gel','Personal care',24,'1 bottle'],['deodorant','Deodorant','Personal care',28,'1 each'],['dogwet','Dog wet food','Dogs',7,'based on 2 dogs'],['dogdry','Dog dry food/biscuits','Dogs',21,'1 bag'],['dogtreats','Dog treats/chews','Dogs',14,'1 pack'],['poobags','Poo bags','Dogs',21,'1 pack']
+].map(x=>({id:x[0],name:x[1],group:x[2],repeat:x[3],estimate:x[4]}));
+const suggested=new Set(['milk','bread','eggs','cheese','butter','cereal','coffee','squash','rice','pasta','potatoes','chicken','beef','pork','fish','fruit','veg','frozen','tinned','toilet','kitchen','laundry','dishwasher','washingup','bags','cleaner','toothpaste','shampoo','shower','deodorant','dogwet','dogdry','dogtreats','poobags']);
+const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
+const iso=d=>{const x=new Date(d);x.setMinutes(x.getMinutes()-x.getTimezoneOffset());return x.toISOString().slice(0,10)};
+const money=n=>'£'+Number(n||0).toFixed(2);
+function fresh(){return{household:{adults:2,children:0,dogs:2,cats:0,pattern:'rolling',budget:80,shops:['Tesco','Aldi']},selected:[...suggested],items:{},history:[],held:{},planned:[]}}
+let state;try{state=JSON.parse(localStorage.getItem(KEY))||fresh()}catch(e){state=fresh()}
+function save(){localStorage.setItem(KEY,JSON.stringify(state))}
+function score(){const learned=Object.values(state.items).filter(x=>x.count>0).length;return Math.min(95,22+learned*2)}
+function daysLeft(c){const it=state.items[c.id];if(!it?.last)return null;const elapsed=Math.max(0,Math.floor((Date.now()-new Date(it.last))/86400000));return Math.max(0,(it.repeat||c.repeat)-elapsed)}
+function candidates(){return state.selected.map(id=>base.find(x=>x.id===id)).filter(Boolean).map(c=>({c,left:daysLeft(c)})).sort((a,b)=>(a.left??99)-(b.left??99))}
+function nav(name){$$('.page').forEach(x=>x.classList.remove('active'));$('#'+name).classList.add('active');$$('.nav button').forEach(x=>x.classList.toggle('active',x.dataset.page===name));render();scrollTo(0,0)}
+$$('[data-page]').forEach(b=>b.onclick=()=>nav(b.dataset.page));
+function renderHome(){
+ const s=score();$('#score').textContent=s+'%';$('#scoreBar').style.width=s+'%';
+ const learned=Object.values(state.items).filter(x=>x.count>0).length;
+ $('#homeMetrics').innerHTML=[['Regular categories',state.selected.length],['Learned',learned],['Recorded shops',state.history.length]].map(([a,b])=>'<div class="metric"><span class="tiny">'+a+'</span><b>'+b+'</b></div>').join('');
+ $('#homePreview').innerHTML=candidates().slice(0,6).map(x=>'<div class="item row"><div><b>'+x.c.name+'</b><div class="tiny">'+(x.left===null?'Starting household estimate':'about '+x.left+' days left')+'</div></div><span class="tag">'+x.c.estimate+'</span></div>').join('');
+ if(state.history.length){$('#nextTitle').textContent='Keep teaching it from real shops';$('#nextText').textContent='The robot now has '+state.history.length+' recorded shop'+(state.history.length===1?'':'s')+'. Record the next one so real behaviour keeps replacing averages.';$('#nextBtn').textContent='Record a Shop';$('#nextBtn').onclick=()=>nav('record')}else{$('#nextTitle').textContent='Use it on your next real shop';$('#nextText').textContent='Open the Shopping Plan. The robot has already chosen what it thinks you need. Only correct obvious mistakes.';$('#nextBtn').textContent='Open Shopping Plan';$('#nextBtn').onclick=()=>nav('plan')}
+}
+function renderPlan(){
+ const list=candidates(),active=list.filter(x=>state.held[x.c.id]!==true);
+ $('#planMetrics').innerHTML=[['Robot recommends',active.length],['Held back',list.length-active.length],['Weekly budget',money(state.household.budget)]].map(([a,b])=>'<div class="metric"><span class="tiny">'+a+'</span><b>'+b+'</b></div>').join('');
+ const groups=[...new Set(list.map(x=>x.c.group))];
+ $('#planList').innerHTML=groups.map(g=>'<div class="item" style="background:var(--panel2)"><b>'+g+'</b></div>'+list.filter(x=>x.c.group===g).map(x=>{const on=!state.held[x.c.id];return '<div class="item row" style="opacity:'+(on?1:.55)+'"><div><b>'+x.c.name+'</b><div class="tiny">'+x.c.estimate+' · '+(x.left===null?'benchmark estimate':'~'+x.left+' days left')+'</div></div><button class="btn sm" data-hold="'+x.c.id+'">'+(on?'Have plenty':'Put back on')+'</button></div>'}).join('')).join('');
+ $$('[data-hold]').forEach(b=>b.onclick=()=>{state.held[b.dataset.hold]=!state.held[b.dataset.hold];save();renderPlan()})
+}
+function renderEssentials(){
+ const q=($('#search').value||'').toLowerCase(),items=state.selected.map(id=>base.find(x=>x.id===id)).filter(c=>c&&(c.name.toLowerCase().includes(q)||c.group.toLowerCase().includes(q))),groups=[...new Set(items.map(x=>x.group))];
+ $('#essentialGroups').innerHTML=groups.map(g=>'<div class="card"><h3>'+g+'</h3><div class="list">'+items.filter(x=>x.group===g).map(c=>{const it=state.items[c.id];return '<div class="item"><b>'+c.name+'</b><div class="tiny">'+c.estimate+(it?.last?' · last recorded '+new Date(it.last).toLocaleDateString():' · benchmark starting point')+'</div></div>'}).join('')+'</div></div>').join('')
+}
+function renderRecord(){
+ $('#store').innerHTML=shops.map(x=>'<option>'+x+'</option>').join('');if(!$('#shopDate').value)$('#shopDate').value=iso(new Date());
+ $('#recordList').innerHTML=state.selected.map(id=>base.find(x=>x.id===id)).filter(Boolean).map(c=>'<label class="item" style="display:flex;gap:10px;align-items:center;margin:0;color:var(--text)"><input type="checkbox" data-rec="'+c.id+'" style="width:22px;min-height:22px" '+(state.planned.includes(c.id)?'checked':'')+'><span><b>'+c.name+'</b><span class="tiny" style="display:block">'+c.estimate+'</span></span></label>').join('');
+ $('#history').innerHTML=state.history.slice().reverse().slice(0,8).map(h=>'<div class="item row"><div><b>'+h.store+'</b><div class="tiny">'+new Date(h.date).toLocaleDateString()+' · '+h.items.length+' categories</div></div><b>'+(h.total?money(h.total):'—')+'</b></div>').join('')||'<div class="item muted small">No shops recorded yet.</div>'
+}
+function renderHousehold(){
+ $('#budget').value=state.household.budget;$('#pattern').value=state.household.pattern;
+ $('#householdSummary').innerHTML='<h3>Your setup</h3><p class="small"><b>2 adults · 2 dogs</b></p><p class="small muted">'+(state.household.pattern==='rolling'?'No fixed shopping day / shop as needed':state.household.pattern==='several'?'Several smaller shops':'One main weekly shop')+' · '+state.household.shops.join(', ')+' · '+money(state.household.budget)+'/week</p><p class="small">'+state.selected.length+' regular categories · '+state.history.length+' recorded shops</p>'
+}
+function render(){renderHome();renderPlan();renderEssentials();renderRecord();renderHousehold();save()}
+$('#search').oninput=renderEssentials;
+$('#resetPlan').onclick=()=>{state.held={};save();renderPlan()};
+$('#usePlan').onclick=()=>{state.planned=candidates().filter(x=>!state.held[x.c.id]).map(x=>x.c.id);save();nav('record')};
+$('#saveShop').onclick=()=>{const ids=$$('[data-rec]:checked').map(x=>x.dataset.rec);if(!ids.length){alert('Select at least one thing that actually came home.');return}const date=$('#shopDate').value||iso(new Date()),store=$('#store').value,total=Number($('#shopTotal').value||0);ids.forEach(id=>{const c=base.find(x=>x.id===id),old=state.items[id]||{};let rep=old.repeat||c.repeat;if(old.last){const elapsed=Math.max(1,Math.floor((new Date(date)-new Date(old.last))/86400000));rep=Math.max(1,Math.round(rep*.65+elapsed*.35))}state.items[id]={count:(old.count||0)+1,last:date,repeat:rep,lastStore:store}});state.history.push({date,store,total,items:ids});state.planned=[];state.held={};$('#shopTotal').value='';save();render();alert('Shop saved. The robot has updated its repeat patterns.')};
+$('#saveSettings').onclick=()=>{state.household.budget=Number($('#budget').value||80);state.household.pattern=$('#pattern').value;save();render();alert('Saved.')};
+$('#tourBtn').onclick=()=>tour.showModal();$('#longScan').onclick=()=>scanInfo.showModal();
+$('#photoBtn').onclick=()=>$('#photoInput').click();$('#uploadBtn').onclick=()=>$('#uploadInput').click();
+$('#photoInput').onchange=e=>{$('#receiptStatus').innerHTML=e.target.files?.[0]?'<b>Photo attached:</b> '+e.target.files[0].name+'<br>This V0 does not extract the basket automatically yet.':'';
+};
+$('#uploadInput').onchange=e=>{$('#receiptStatus').innerHTML=e.target.files?.[0]?'<b>Upload attached:</b> '+e.target.files[0].name+'<br>This V0 does not extract the basket automatically yet.':'';
+};
+$('#backup').onclick=()=>{const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='household-robot-live-backup.json';a.click();URL.revokeObjectURL(a.href)};
+$('#today').textContent=new Date().toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'long'});render();
+</script>
+</body></html>
