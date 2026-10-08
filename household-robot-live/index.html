@@ -40,7 +40,7 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 </head>
 <body>
 <div class="app">
-<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 2.1</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
+<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 2.2</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
 <main>
 <section id="home" class="page active">
 <div class="card soft hubStatus">
@@ -250,6 +250,32 @@ state.selected=[...new Set(state.selected||[])];
   }
  }catch(e){console.warn('Legacy learning repair skipped',e)}
 })();
+(function reclassifySavedReceiptLines(){
+ try{
+  let changed=false;
+  for(const h of (state.history||[])){
+   if(!Array.isArray(h.receiptProducts))continue;
+   const kept=[];
+   for(const p of h.receiptProducts){
+    if(receiptExclusions.test(p.name||'')){changed=true;continue}
+    const key=productKey(p.name);
+    const mem=state.productMemory?.[key];
+    if(mem?.userCorrected){
+      p.ignored=!!mem.ignored;
+      p.category=mem.ignored?null:(mem.category||null);
+    }else{
+      const next=categoryFor(p.name);
+      if(next!==p.category){p.category=next;changed=true}
+    }
+    kept.push(p);
+   }
+   if(kept.length!==h.receiptProducts.length){h.receiptProducts=kept;h.receiptLines=kept.length}
+   h.items=[...new Set(kept.filter(p=>!p.ignored&&p.category).map(p=>p.category))];
+  }
+  if(changed){rebuildEvidenceFromHistory();localStorage.setItem(KEY,JSON.stringify(state))}
+ }catch(e){console.warn('Receipt reclassification skipped',e)}
+})();
+
 function save(){localStorage.setItem(KEY,JSON.stringify(state))}
 function score(){
  const baseScore=20;
@@ -352,28 +378,28 @@ function renderEssentials(){
 }
 
 const categoryRules=[
- ['milk',/\bMILK\b|SEMI[\s-]*SKIM|SKIMMED|WHOLE\s*MILK/i],
- ['bread',/\bBREAD\b|\bLOAF\b|\bROLLS?\b|BAGUETTE/i],
- ['eggs',/\bEGGS?\b/i],
+ ['milk',/\b(?:JS\s+)?(?:SKIM|SKIMMED|SEMI[\s-]*SKIM|WHOLE)\s+MILK\b|\bMILK\s+\d+(?:\.\d+)?L\b|\bMILK\b/i],
+ ['bread',/\bBREAD\b|\bLOAF\b|\bBAGUETTE\b|\bBAPS?\b/i],
+ ['eggs',/\bEGGS?\b|\bFREE\s*RANGE\s*EGGS?\b/i],
  ['cheese',/CHEESE|CHEDDAR|MOZZARELLA|PARMESAN|BRIE|STILTON/i],
- ['butter',/\bBUTTER\b|\bSPREAD\b|MARGARINE/i],
+ ['butter',/\bBUTTER\b|\bMARGARINE\b/i],
  ['yoghurt',/YOGH?URT|FROMAGE/i],
  ['cereal',/CEREAL|OATS|PORRIDGE|GRANOLA|WEETABIX/i],
- ['coffee',/COFFEE|NESCAF|K(EN)?CO|LAVAZZA/i],
+ ['coffee',/COFFEE|NESCAF|K(?:EN)?CO|LAVAZZA|NESCAFE|\bCAFE\b.*\bCOFFEE\b/i],
  ['tea',/\bTEA\b|TEABAGS?/i],
  ['squash',/SQUASH|CORDIAL|RIBENA|ROBINSON/i],
  ['rice',/\bRICE\b/i],
  ['pasta',/PASTA|NOODLE|SPAGHETTI|PENNE|FUSILLI/i],
  ['potatoes',/POTATO|SPUD/i],
- ['chicken',/CHICKEN/i],
- ['beef',/\bBEEF\b|STEAK|BRISKET/i],
- ['pork',/\bPORK\b|BACON|GAMMON/i],
+ ['chicken',/CHICKEN|CHCKN|CHKN/i],
+ ['beef',/\bBEEF\b|STEAK|BRISKET|BEEF\s+MINCE/i],
+ ['pork',/\bPORK\b|BACON|GAMMON|PORK\s+MIN/i],
  ['lamb',/\bLAMB\b/i],
  ['turkey',/\bTURKEY\b/i],
- ['fish',/\bFISH\b|SALMON|COD\b|HADDOCK|TUNA|PRAWN|SEAFOOD|MACKEREL|SARDINE/i],
+ ['fish',/\bFISH\b|SALMON|COD\b|HADDOCK|TUNA|PRAWN|SEAFOOD|MACKEREL|SARDINE|SRDNE|FISH\s*BITES?/i],
  ['veggie',/TOFU|TEMPEH|QUORN|VEGAN|VEGETARIAN|MEAT[\s-]*FREE|PLANT[\s-]*BASED/i],
- ['fruit',/APPLE|BANANA|ORANGE|GRAPE|BERRY|BERRIES|STRAWB|BLUEB|RASPB|PEAR|MELON|MANGO|PEACH|PLUM|LEMON|LIME|KIWI|AVOCADO/i],
- ['veg',/CARROT|BROCC|COURGETTE|PEPPER|ONION|TOMATO|CUCUMBER|LETTUCE|SPINACH|MUSHROOM|CABBAGE|CAULIF|BEANS|PEAS|SWEETCORN|AUBERGINE|CELERY/i],
+ ['fruit',/APPLE|BANANA|ORANGE|GRAPE|BERRY|BERRIES|RASPB|STRAWB|BLUEB|PEAR|MELON|MANGO|PEACH|PLUM|LEMON|LIME|KIWI|AVOCADO/i],
+ ['veg',/CARROT|BROCC|COURGETTE|PEPPER|ONION|TOMATO|CUCUMBER|LETTUCE|SPINACH|MUSHROOM|CABBAGE|CAULIF|PEAS|SWEETCORN|AUBERGINE|CELERY|LEEKS?\b/i],
  ['frozen',/FROZEN|ICE\s*CREAM/i],
  ['tinned',/TINNED|CANNED|BAKED\s*BEANS|CHOPPED\s*TOM|SOUP\b/i],
  ['toilet',/TOILET\s*(ROLL|TISSUE)|BATHROOM\s*TISSUE/i],
@@ -392,9 +418,26 @@ const categoryRules=[
  ['dogdry',/DOG\s*(DRY|KIBBLE|BISCUIT)|KIBBLE/i],
  ['dogwet',/DOG\s*(FOOD|TIN|POUCH|WET)|PEDIGREE|CESAR\b|BUTCHER'?S/i]
 ];
-const receiptExclusions=/BALANCE\s+DUE|TOTAL\s+DUE|GRAND\s+TOTAL|SUB\s*TOTAL|PAYMENT|VISA|MASTERCARD|CHANGE\b|SAVINGS?|PROMOTION|PRICE\s+SAVING|NECTAR\s+PRICE|POINTS?|AUTH\b|AID\b|PAN\b|MERCHANT|CARD\b|VAT\b|COUPON|DISCOUNT|RECEIPT|THANK\s+YOU|CUSTOMER|TILL\b|CASH\b/i;
 
+const receiptExclusions=/BALANCE\s+DUE|TOTAL\s+DUE|GRAND\s+TOTAL|SUB\s*TOTAL|PAYMENT|VISA|MASTERCARD|CHANGE\b|SAVINGS?|PROMOT(?:ION|IONS)?|ORIGINAL\s+PRICE|PRICE\s+SAVING|NECTAR\s+PRICE|POINTS?|AUTH\b|AID\b|PAN\b|MERCHANT|CARD\b|VAT\b|COUPON|DISCOUNT|RECEIPT|THANK\s+YOU|CUSTOMER|TILL\b|CASH\b/i;
+const productNonCategoryPatterns=[
+ /MILK\s+ROLLS?/i,
+ /SAGE\s*&?\s*ONION\s+STUFF/i,
+ /SPRING\s+ROLLS?/i,
+ /EGG\s+BITES?/i
+];
+function productKey(name){return String(name||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,100)}
+function rememberedCategory(name){
+ const pm=state?.productMemory?.[productKey(name)];
+ if(pm?.ignored)return '__ignore__';
+ if(pm?.category)return pm.category;
+ return null;
+}
 function categoryFor(name){
+ const remembered=rememberedCategory(name);
+ if(remembered)return remembered==='__ignore__'?null:remembered;
+ if(receiptExclusions.test(name))return null;
+ if(productNonCategoryPatterns.some(re=>re.test(name)))return null;
  for(const [id,re] of categoryRules) if(re.test(name)) return id;
  return null;
 }
@@ -550,11 +593,52 @@ function showHistoryDetail(reverseIndex){
  renderHistoryDetail();
  historyDetail.showModal();
 }
+function applyHistoricalCorrection(productIndex,category){
+ const h=state.history.slice().reverse()[historyDetailState.index]; if(!h||!Array.isArray(h.receiptProducts))return;
+ const p=h.receiptProducts[productIndex]; if(!p)return;
+ const key=productKey(p.name);
+ if(category==='__ignore__'){
+  p.category=null;p.ignored=true;
+  state.productMemory[key]={...(state.productMemory[key]||{}),name:p.name,ignored:true,category:null,userCorrected:true};
+ }else{
+  p.category=category||null;p.ignored=false;
+  state.productMemory[key]={...(state.productMemory[key]||{}),name:p.name,ignored:false,category:category||null,userCorrected:true};
+ }
+ const cats=[...new Set(h.receiptProducts.filter(x=>!x.ignored&&x.category).map(x=>x.category))];
+ h.items=cats;
+ save();
+ rebuildEvidenceFromHistory();
+ renderHistoryDetail();
+ render();
+}
+function rebuildEvidenceFromHistory(){
+ const rebuilt={};
+ for(const h of (state.history||[])){
+  for(const id of (h.items||[])){
+   const cat=base.find(x=>x.id===id); if(!cat)continue;
+   const old=rebuilt[id]||{count:0,last:null,repeat:cat.repeat,lastStore:h.store};
+   old.count++;
+   if(!old.last||new Date(h.date)>=new Date(old.last)){old.last=h.date;old.lastStore=h.store}
+   rebuilt[id]=old;
+  }
+ }
+ state.items=rebuilt;
+}
+function suggestedCategoryFor(name){
+ const n=String(name||'');
+ if(/SKIM.*MILK|MILK\s+\d/i.test(n))return 'milk';
+ if(/LEEKS?/i.test(n))return 'veg';
+ if(/COFFEE|CAFE/i.test(n))return 'coffee';
+ if(/CHCKN|CHICKEN|CHKN/i.test(n))return 'chicken';
+ if(/SRDNE|SARDINE|FISH\s*BITES?/i.test(n))return 'fish';
+ return categoryFor(n);
+}
 function renderHistoryDetail(){
  const h=state.history.slice().reverse()[historyDetailState.index]; if(!h)return;
  const products=Array.isArray(h.receiptProducts)?h.receiptProducts:[];
- const matchedProducts=products.filter(p=>p.category);
- const unmatchedProducts=products.filter(p=>!p.category);
+ const matchedProducts=products.filter(p=>!p.ignored&&p.category);
+ const unmatchedProducts=products.filter(p=>!p.ignored&&!p.category);
+ const ignoredProducts=products.filter(p=>p.ignored);
  const uniqueCats=[...new Set(matchedProducts.map(p=>p.category))];
  const spendByCat={};
  for(const p of matchedProducts) spendByCat[p.category]=(spendByCat[p.category]||0)+Number(p.price||0);
@@ -565,14 +649,29 @@ function renderHistoryDetail(){
   const count=matchedProducts.filter(p=>p.category===id).length;
   return '<div class="row" style="padding:6px 0"><div><b>'+cat.name+'</b><div class="tiny">'+count+' receipt line'+(count===1?'':'s')+' contributed</div></div><span class="tag">'+money(spendByCat[id]||0)+'</span></div>';
  }).join('');
- $('#historyLearned').innerHTML='<div class="tiny">WHAT I LEARNED</div><h3 style="margin-top:4px">'+uniqueCats.length+' household categories strengthened</h3><p class="small muted">'+(uniqueCats.length?'This shop added evidence for the categories below. One shop is still early evidence, not a fixed routine.':'No household categories were confidently matched from this receipt.')+'</p>'+(learnedRows||'<div class="tiny">No matched categories yet.</div>');
- $('#historyLineSummary').textContent=matchedProducts.length+' matched · '+unmatchedProducts.length+' need checking';
+ $('#historyLearned').innerHTML='<div class="tiny">WHAT I LEARNED</div><h3 style="margin-top:4px">'+uniqueCats.length+' household categories strengthened</h3><p class="small muted">'+(uniqueCats.length?'Corrections you make here are remembered for future receipts.':'No household categories were confidently matched from this receipt.')+'</p>'+(learnedRows||'<div class="tiny">No matched categories yet.</div>');
+ $('#historyLineSummary').textContent=matchedProducts.length+' matched · '+unmatchedProducts.length+' need checking · '+ignoredProducts.length+' ignored';
  $('#historyOnlyChecks').textContent=historyDetailState.onlyChecks?'Show all':'Show needs check';
- const visible=historyDetailState.onlyChecks?unmatchedProducts:products;
- $('#historyProducts').innerHTML=visible.length?visible.map((p,i)=>{
+ const indexed=products.map((p,index)=>({p,index}));
+ const visible=historyDetailState.onlyChecks?indexed.filter(x=>!x.p.ignored&&!x.p.category):indexed;
+ const options='<option value="">Choose category…</option>'+base.map(cat=>'<option value="'+cat.id+'">'+cat.name+'</option>').join('');
+ $('#historyProducts').innerHTML=visible.length?visible.map(({p,index})=>{
   const cat=p.category?base.find(c=>c.id===p.category):null;
-  return '<div class="item"><div class="row"><div style="min-width:0"><b>'+escapeHtml(p.name)+'</b><div class="tiny">'+(cat?'Matched to '+cat.name:'Needs check — not matched to a household category')+'</div></div><b>'+money(p.price)+'</b></div></div>';
+  const suggestion=!cat&&!p.ignored?suggestedCategoryFor(p.name):null;
+  const suggCat=suggestion?base.find(c=>c.id===suggestion):null;
+  return '<div class="item"><div class="row"><div style="min-width:0"><b>'+escapeHtml(p.name)+'</b><div class="tiny">'+(p.ignored?'Ignored':cat?'Matched to '+cat.name:'Needs check — not matched')+'</div></div><b>'+money(p.price)+'</b></div>'+
+   (!p.ignored&&!cat&&suggCat?'<button class="btn sm" style="margin-top:8px" data-use-suggest="'+index+'" data-cat="'+suggCat.id+'">Use '+suggCat.name+'</button>':'')+
+   '<div class="row" style="margin-top:8px"><select data-hist-cat="'+index+'" style="flex:1">'+options+'</select><button class="btn sm" data-hist-ignore="'+index+'">'+(p.ignored?'Unignore':'Ignore')+'</button></div></div>';
  }).join(''):'<div class="item muted small">'+(historyDetailState.onlyChecks?'No unmatched receipt lines.':'No receipt lines stored for this shop.')+'</div>';
+ $$('[data-use-suggest]').forEach(btn=>btn.onclick=()=>applyHistoricalCorrection(Number(btn.dataset.useSuggest),btn.dataset.cat));
+ $$('[data-hist-cat]').forEach(sel=>{
+  const idx=Number(sel.dataset.histCat); const p=products[idx]; sel.value=p?.category||'';
+  sel.onchange=()=>{if(sel.value)applyHistoricalCorrection(idx,sel.value)};
+ });
+ $$('[data-hist-ignore]').forEach(btn=>btn.onclick=()=>{
+  const idx=Number(btn.dataset.histIgnore); const p=products[idx];
+  applyHistoricalCorrection(idx,p?.ignored?'': '__ignore__');
+ });
 }
 function renderRecord(){
  $('#store').innerHTML=shops.map(x=>'<option>'+x+'</option>').join('');
