@@ -18,7 +18,7 @@ main{padding:16px}.page{display:none}.page.active{display:block}.card{background
 .row{display:flex;justify-content:space-between;gap:12px;align-items:center}.list{border-top:1px solid var(--line);margin:12px -16px -16px}.item{padding:13px 16px;border-bottom:1px solid var(--line)}.item:last-child{border-bottom:0}
 .tag{display:inline-block;border:1px solid var(--line);border-radius:99px;padding:4px 8px;font-size:12px;color:var(--muted);margin:2px 4px 2px 0}
 .notice{border-left:4px solid var(--warn);padding:12px 14px;background:rgba(255,217,142,.08);border-radius:8px}.goodbox{border-left:4px solid var(--good);padding:12px 14px;background:rgba(153,226,180,.07);border-radius:8px}
-input,select{width:100%;min-height:44px;border:1px solid var(--line);border-radius:10px;background:#0d1425;color:var(--text);padding:10px}input[type=checkbox]{width:24px;height:24px;min-height:24px;padding:0;accent-color:var(--accent);flex:0 0 24px}label.item:has(input[type=checkbox]:checked){background:rgba(157,213,255,.08)}label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+input,select{width:100%;min-height:44px;border:1px solid var(--line);border-radius:10px;background:#0d1425;color:var(--text);padding:10px}input[type=checkbox]{width:24px;height:24px;min-height:24px;padding:0;accent-color:var(--accent);flex:0 0 24px}label.item:has(input[type=checkbox]:checked){background:rgba(157,213,255,.08)}.recordItem.selected{background:rgba(157,213,255,.14);border-left:4px solid var(--accent);padding-left:12px}.recordItem.selected b:after{content:'  ✓';color:var(--accent)}label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
 .nav{position:fixed;bottom:0;left:0;right:0;z-index:30;background:rgba(11,16,32,.98);border-top:1px solid var(--line);display:flex;justify-content:center;padding-bottom:max(8px,env(safe-area-inset-bottom))}
 .navinner{display:grid;grid-template-columns:repeat(5,1fr);width:min(760px,100%)}.nav button{border:0;background:transparent;color:var(--muted);padding:10px 4px;font-size:11px;min-height:58px}.nav button.active{color:var(--text);font-weight:700}
 .bar{height:10px;background:#0a1120;border:1px solid var(--line);border-radius:99px;overflow:hidden}.bar>i{display:block;height:100%;background:var(--accent)}
@@ -28,7 +28,7 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 </head>
 <body>
 <div class="app">
-<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 1.4</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
+<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 1.5</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
 <main>
 <section id="home" class="page active">
 <div class="card soft"><div class="tiny">LIVE TEST</div><h3>Your household is ready</h3><p class="small muted">2 adults, 2 dogs, no fixed shopping day, Tesco + Aldi. Your changes stay saved on this web address.</p></div>
@@ -42,7 +42,7 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 <h2>Shopping Plan</h2><p class="small muted">This is the robot's list, not a blank checklist for you to build.</p>
 <div class="card"><div class="notice small"><b>First-shop limitation:</b> I know the household model but not exactly what is in your cupboards today. If something is wrong, tap “Have plenty”. After real shops are recorded, this should need fewer corrections.</div></div>
 <div class="grid g3" id="planMetrics"></div>
-<div class="card"><div class="row"><div><h3>Recommended next shop</h3><div class="tiny">Everything below is included unless you correct it.</div></div><button class="btn sm" id="resetPlan">Reset corrections</button></div><div id="planList" class="list"></div></div>
+<div id="planStatus" class="goodbox small" style="display:none;margin-bottom:14px"></div><div class="card"><div class="row"><div><h3>Recommended next shop</h3><div class="tiny">Everything below is included unless you correct it.</div></div><button class="btn sm" id="resetPlan">Reset corrections</button></div><div id="planList" class="list"></div></div>
 <div class="card"><button class="btn primary" style="width:100%" id="usePlan">Use this plan</button></div>
 </section>
 
@@ -333,7 +333,8 @@ function escapeHtml(s){return String(s).replace(/[&<>"']/g,ch=>({'&':'&amp;','<'
 
 function renderRecord(){
  $('#store').innerHTML=shops.map(x=>'<option>'+x+'</option>').join('');if(!$('#shopDate').value)$('#shopDate').value=iso(new Date());
- $('#recordList').innerHTML=state.selected.map(id=>base.find(x=>x.id===id)).filter(Boolean).map(c=>'<label class="item" style="display:flex;gap:10px;align-items:center;margin:0;color:var(--text)"><input type="checkbox" data-rec="'+c.id+'" style="width:22px;min-height:22px" '+(state.planned.includes(c.id)?'checked':'')+'><span><b>'+c.name+'</b><span class="tiny" style="display:block">'+c.estimate+'</span></span></label>').join('');
+ $('#recordList').innerHTML=state.selected.map(id=>base.find(x=>x.id===id)).filter(Boolean).map(c=>{const selected=state.planned.includes(c.id);return '<label class="item recordItem '+(selected?'selected':'')+'" style="display:flex;gap:10px;align-items:center;margin:0;color:var(--text)"><input type="checkbox" data-rec="'+c.id+'" '+(selected?'checked':'')+'><span><b>'+c.name+'</b><span class="tiny" style="display:block">'+c.estimate+'</span></span></label>'}).join('');
+ $('[data-rec]').forEach(cb=>cb.onchange=()=>cb.closest('.recordItem')?.classList.toggle('selected',cb.checked));
  $('#history').innerHTML=state.history.slice().reverse().slice(0,8).map(h=>'<div class="item row"><div><b>'+h.store+'</b><div class="tiny">'+new Date(h.date).toLocaleDateString()+' · '+h.items.length+' categories'+(h.receiptLines?' · '+h.receiptLines+' receipt lines':'')+'</div></div><b>'+(h.total?money(h.total):'—')+'</b></div>').join('')||'<div class="item muted small">No shops recorded yet.</div>';
  applyReceiptDraft()
 }
@@ -343,7 +344,7 @@ function renderHousehold(){
 }
 function render(){renderHome();renderPlan();renderEssentials();renderRecord();renderHousehold();save()}
 $('#search').oninput=renderEssentials;
-$('#resetPlan').onclick=()=>{state.held={};save();renderPlan()};
+$('#resetPlan').onclick=()=>{state.held={};save();renderPlan();const s=$('#planStatus');if(s){s.style.display='block';s.innerHTML='<b>Corrections reset.</b> Everything is back on the robot\'s recommended plan.'}};
 $('#usePlan').onclick=()=>{state.planned=candidates().filter(x=>!state.held[x.c.id]).map(x=>x.c.id);save();nav('record')};
 $('#saveShop').onclick=()=>{
  try{
