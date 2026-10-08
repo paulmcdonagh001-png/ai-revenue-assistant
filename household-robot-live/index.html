@@ -25,6 +25,14 @@ input,select{width:100%;min-height:44px;border:1px solid var(--line);border-radi
 .hubGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:14px}
 .hubCard{min-height:132px;text-align:left;border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:16px;padding:16px;display:flex;flex-direction:column;justify-content:space-between;gap:12px}
 .hubCard:active{transform:scale(.99)}.hubCard b{display:block;font-size:17px}.hubCard small{display:block;color:var(--muted);font-size:12px;line-height:1.35;margin-top:4px}.hubIcon{font-size:26px}.hubScore{text-align:right}.hubScore b{display:block;font-size:30px;margin-top:2px}.hubStatus{padding-bottom:15px}
+details.card>summary{cursor:pointer;list-style:none}details.card>summary::-webkit-details-marker{display:none}
+details.card>summary:after{content:'›';float:right;color:var(--muted);font-size:22px;transform:rotate(90deg)}
+details.card[open]>summary:after{transform:rotate(-90deg)}
+.settingCard summary b{display:block;font-size:17px}.settingCard summary .tiny{display:block;margin-top:4px}
+.settingsGrid{display:grid;gap:12px}
+.essentialHead{display:flex;justify-content:space-between;gap:12px;align-items:center}
+.historyBtn{width:100%;text-align:left;border:0;background:transparent;color:inherit;padding:0}
+
 @media(max-width:420px){.hubGrid{gap:10px}.hubCard{min-height:122px;padding:14px}.hubCard b{font-size:16px}}
 dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:16px;width:min(680px,calc(100% - 24px));padding:18px}dialog::backdrop{background:rgba(0,0,0,.65)}
 @media(max-width:560px){.g3{grid-template-columns:1fr 1fr}.row.mobile{align-items:stretch;flex-direction:column}}
@@ -32,7 +40,7 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 </head>
 <body>
 <div class="app">
-<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 1.9</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
+<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 2.0</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
 <main>
 <section id="home" class="page active">
 <div class="card soft hubStatus">
@@ -81,40 +89,95 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 </section>
 
 <section id="essentials" class="page">
-<h2>Household Essentials</h2><p class="small muted">Generated from your household profile. These become more specific as receipts and shops teach the robot.</p>
-<div class="card"><input id="search" placeholder="Search essentials"></div><div id="essentialGroups"></div>
+<h2>Household Essentials</h2>
+<p class="small muted">A compact view of what the robot thinks your household regularly uses.</p>
+<div class="card"><input id="search" placeholder="Search essentials"></div>
+<div id="essentialSummary" class="grid g3" style="margin-bottom:14px"></div>
+<div id="essentialGroups"></div>
 </section>
 
 <section id="record" class="page">
-<h2>Record Shop</h2><p class="small muted">This is how the robot learns what your household actually buys.</p>
+<h2>Record Shop</h2>
+<p class="small muted">Scan first. Only correct what the robot could not understand.</p>
+
 <div class="card">
-<h3>Receipt capture</h3>
-<p class="small muted">Take or upload a clear receipt image. Reading happens on this device for the V0 test — the photo is not sent to our own server.</p>
-<div class="grid" style="grid-template-columns:1fr 1fr;gap:8px">
-<button class="btn" id="longScan"><b>Long receipt scan</b><br><span class="tiny">Video-style sweep comes next</span></button>
-<button class="btn primary" id="photoBtn"><b>Take photo & read it</b><br><span class="tiny">Fill the frame with the receipt</span></button>
-<button class="btn" id="uploadBtn" style="grid-column:1/-1"><b>Upload receipt / screenshot</b><br><span class="tiny">Image from camera roll or supermarket app</span></button>
+  <div class="tiny">RECEIPT SCAN</div>
+  <h3 style="margin-top:4px">Teach the robot from a real shop</h3>
+  <p class="small muted">For V0, receipt reading happens on this device.</p>
+  <div class="grid" style="grid-template-columns:1fr 1fr;gap:8px">
+    <button class="btn" id="longScan"><b>Long receipt scan</b><br><span class="tiny">Video-style sweep comes next</span></button>
+    <button class="btn primary" id="photoBtn"><b>Take photo & read it</b><br><span class="tiny">Fill the frame with the receipt</span></button>
+    <button class="btn" id="uploadBtn" style="grid-column:1/-1"><b>Upload receipt / screenshot</b><br><span class="tiny">Camera roll or supermarket app</span></button>
+  </div>
+  <div id="receiptStatus" class="small" style="margin-top:12px"></div>
+  <div id="ocrProgressWrap" style="display:none;margin-top:10px"><div class="bar"><i id="ocrProgress" style="width:0%"></i></div><div id="ocrProgressText" class="tiny" style="margin-top:5px"></div></div>
+  <input id="photoInput" type="file" accept="image/*" capture="environment" hidden>
+  <input id="uploadInput" type="file" accept="image/*" hidden>
 </div>
-<div id="receiptStatus" class="small" style="margin-top:12px"></div>
-<div id="ocrProgressWrap" style="display:none;margin-top:10px"><div class="bar"><i id="ocrProgress" style="width:0%"></i></div><div id="ocrProgressText" class="tiny" style="margin-top:5px"></div></div>
-<input id="photoInput" type="file" accept="image/*" capture="environment" hidden>
-<input id="uploadInput" type="file" accept="image/*" hidden>
-</div>
+
 <div class="card" id="receiptReviewCard" style="display:none">
-<div class="row"><div><h3>Receipt read</h3><div id="receiptSummary" class="tiny"></div></div><button class="btn sm" id="clearReceipt">Clear</button></div>
-<div id="receiptMeta" class="goodbox small" style="margin-top:10px"></div>
-<div id="receiptItems" class="list"></div>
-<p class="tiny" style="margin-top:12px">Green/labelled matches are accepted automatically. Only change lines I have not understood correctly.</p>
+  <div class="row"><div><div class="tiny">CURRENT RECEIPT</div><h3 style="margin-top:4px">What I found</h3><div id="receiptSummary" class="tiny"></div></div><button class="btn sm" id="clearReceipt">Clear</button></div>
+  <div id="receiptMeta" class="goodbox small" style="margin-top:10px"></div>
+  <div id="receiptItems" class="list"></div>
+  <p class="tiny" style="margin-top:12px">Only change anything marked “Needs check”.</p>
 </div>
-<div class="card"><div class="row mobile"><div style="flex:1"><label>Shop</label><select id="store"></select></div><div style="flex:1"><label>Date</label><input id="shopDate" type="date"></div><div style="flex:1"><label>Total (£)</label><input id="shopTotal" type="number" step=".01" min="0"></div></div></div>
-<div class="card"><h3>Confirm what actually came home</h3><p class="tiny">If you arrived from Shopping Plan, planned items are already selected and highlighted. Untick only something you did not actually buy.</p><div id="recordList" class="list"></div><button class="btn primary" style="width:100%;margin-top:14px" id="saveShop">Save shop</button></div>
-<div id="shopSaveStatus" class="goodbox small" style="display:none;margin-bottom:14px"></div><div class="card"><h3>Recent shops</h3><div id="history" class="list"></div></div>
+
+<div id="shopSaveStatus" class="goodbox small" style="display:none;margin-bottom:14px"></div>
+
+<div class="card">
+  <div class="tiny">SHOP HISTORY</div>
+  <h3 style="margin-top:4px">Recent shops</h3>
+  <div id="history" class="list"></div>
+</div>
+
+<details class="card" id="manualConfirm">
+  <summary><b>Manual confirmation / corrections</b><span class="tiny" style="display:block">Only use this if the receipt missed something or you have no receipt.</span></summary>
+  <div style="margin-top:14px">
+    <div class="row mobile"><div style="flex:1"><label>Shop</label><select id="store"></select></div><div style="flex:1"><label>Date</label><input id="shopDate" type="date"></div><div style="flex:1"><label>Total (£)</label><input id="shopTotal" type="number" step=".01" min="0"></div></div>
+    <div id="recordList" class="list" style="margin-top:12px"></div>
+    <button class="btn primary" style="width:100%;margin-top:14px" id="saveShop">Save shop</button>
+  </div>
+</details>
 </section>
 
 <section id="household" class="page">
-<h2>Household</h2><div class="card" id="householdSummary"></div>
-<div class="card"><h3>Budget & shopping</h3><div id="settingsStatus" class="goodbox small" style="display:none;margin-bottom:10px"></div><label>Weekly budget</label><input id="budget" type="number" min="1"><label style="margin-top:10px">Shopping pattern</label><select id="pattern"><option value="rolling">No fixed day / shop as needed</option><option value="several">Several smaller shops</option><option value="weekly">One main weekly shop</option></select><button class="btn primary" style="width:100%;margin-top:12px" id="saveSettings">Save</button></div>
-<div class="card"><h3>Data</h3><p class="tiny">This live test saves on this web address in your browser.</p><button class="btn" id="backup">Backup data</button></div>
+<h2>Household</h2>
+<p class="small muted">The settings that shape what the robot predicts and recommends.</p>
+<div id="householdSummary" class="card"></div>
+
+<div class="settingsGrid">
+  <details class="card settingCard" open>
+    <summary><b>💷 Budget & shopping</b><span class="tiny">Budget and shopping rhythm</span></summary>
+    <div style="margin-top:14px">
+      <div id="settingsStatus" class="goodbox small" style="display:none;margin-bottom:10px"></div>
+      <label>Weekly budget</label><input id="budget" type="number" min="1">
+      <label style="margin-top:10px">Shopping pattern</label>
+      <select id="pattern"><option value="rolling">No fixed day / shop as needed</option><option value="several">Several smaller shops</option><option value="weekly">One main weekly shop</option></select>
+      <button class="btn primary" style="width:100%;margin-top:12px" id="saveSettings">Save changes</button>
+    </div>
+  </details>
+
+  <details class="card settingCard">
+    <summary><b>👥 People & pets</b><span class="tiny" id="peoplePetsSummary">2 adults · 2 dogs</span></summary>
+    <div class="small muted" style="margin-top:12px">Full editing comes next. These details currently drive the household benchmark model.</div>
+  </details>
+
+  <details class="card settingCard">
+    <summary><b>🛒 Supermarkets</b><span class="tiny" id="shopsSummary">Tesco · Aldi</span></summary>
+    <div class="small muted" style="margin-top:12px">Retailer preferences should be learned from repeat receipt evidence rather than one shop.</div>
+  </details>
+
+  <details class="card settingCard">
+    <summary><b>📊 Learning & history</b><span class="tiny" id="learningSummary">1 recorded shop</span></summary>
+    <div class="small muted" style="margin-top:12px">This will become the audit view for what the robot knows, what is uncertain, and why.</div>
+  </details>
+
+  <details class="card settingCard">
+    <summary><b>💾 Data & backup</b><span class="tiny">Saved in this browser</span></summary>
+    <p class="tiny" style="margin-top:12px">This live test saves on this web address in your browser.</p>
+    <button class="btn" id="backup">Backup data</button>
+  </details>
+</div>
 </section>
 </main>
 <nav class="nav"><div class="navinner">
@@ -129,6 +192,12 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 <div class="goodbox small" style="margin-top:8px"><b>3. Record Shop</b><br>After shopping, confirm what actually came home. This is what teaches it.</div>
 <div class="goodbox small" style="margin-top:8px"><b>4. Repeat</b><br>Real purchase cycles gradually replace the starting household averages.</div>
 <button class="btn primary" style="width:100%;margin-top:12px" onclick="tour.close()">Got it</button>
+</dialog>
+
+<dialog id="historyDetail">
+<div class="row"><div><div class="tiny">RECORDED SHOP</div><h2 id="historyTitle" style="margin-top:4px"></h2></div><button class="btn sm" onclick="historyDetail.close()">Close</button></div>
+<div id="historyMeta" class="goodbox small" style="margin-top:10px"></div>
+<div id="historyProducts" class="list" style="margin-top:10px"></div>
 </dialog>
 
 <dialog id="scanInfo">
@@ -263,8 +332,21 @@ function renderPlan(){
  $('#usePlan').textContent=active.length?'Use this plan ('+active.length+')':'No items to plan yet';
 }
 function renderEssentials(){
- const q=($('#search').value||'').toLowerCase(),items=state.selected.map(id=>base.find(x=>x.id===id)).filter(c=>c&&(c.name.toLowerCase().includes(q)||c.group.toLowerCase().includes(q))),groups=[...new Set(items.map(x=>x.group))];
- $('#essentialGroups').innerHTML=groups.map(g=>'<div class="card"><h3>'+g+'</h3><div class="list">'+items.filter(x=>x.group===g).map(c=>{const it=state.items[c.id];return '<div class="item"><b>'+c.name+'</b><div class="tiny">'+c.estimate+(it?.last?' · last recorded '+new Date(it.last).toLocaleDateString():' · benchmark starting point')+'</div></div>'}).join('')+'</div></div>').join('')
+ const q=($('#search').value||'').trim().toLowerCase();
+ const all=state.selected.map(id=>base.find(x=>x.id===id)).filter(Boolean);
+ const items=all.filter(c=>!q||c.name.toLowerCase().includes(q)||c.group.toLowerCase().includes(q));
+ const groups=[...new Set(items.map(x=>x.group))];
+ const seenCount=all.filter(c=>state.items?.[c.id]?.count>0).length;
+ $('#essentialSummary').innerHTML=[
+  ['Regular',all.length],
+  ['Seen in shops',seenCount],
+  ['Still learning',Math.max(0,all.length-seenCount)]
+ ].map(([a,b])=>'<div class="metric"><span class="tiny">'+a+'</span><b>'+b+'</b></div>').join('');
+ $('#essentialGroups').innerHTML=groups.map(g=>{
+  const groupItems=items.filter(x=>x.group===g);
+  const seen=groupItems.filter(x=>state.items?.[x.id]?.count>0).length;
+  return '<details class="card"'+(q?' open':'')+'><summary><div class="essentialHead"><span><b>'+g+'</b><span class="tiny" style="display:block">'+groupItems.length+' items · '+seen+' seen in shops</span></span></div></summary><div class="list">'+groupItems.map(c=>{const it=state.items[c.id];return '<div class="item"><b>'+c.name+'</b><div class="tiny">'+c.estimate+(it?.last?' · last seen '+new Date(it.last).toLocaleDateString():' · still benchmark-based')+'</div></div>'}).join('')+'</div></details>';
+ }).join('') || '<div class="card muted small">No essentials match that search.</div>';
 }
 
 const categoryRules=[
@@ -452,7 +534,7 @@ function applyReceiptDraft(){
  // Receipt evidence becomes the authority for this shop. Planned items are no longer assumed bought.
  setTimeout(()=>{
   const cats=new Set(d.items.filter(x=>x.include&&x.category).map(x=>x.category));
-  $('[data-rec]').forEach(cb=>{
+  $$('[data-rec]').forEach(cb=>{
    cb.checked=cats.has(cb.dataset.rec);
    cb.closest('.recordItem')?.classList.toggle('selected',cb.checked);
   });
@@ -460,17 +542,41 @@ function applyReceiptDraft(){
 }
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
 
-function renderRecord(){
- $('#store').innerHTML=shops.map(x=>'<option>'+x+'</option>').join('');if(!$('#shopDate').value)$('#shopDate').value=iso(new Date());
- const receiptCats=new Set((state.receiptDraft?.items||[]).filter(x=>x.include&&x.category).map(x=>x.category));
- $('#recordList').innerHTML=state.selected.map(id=>base.find(x=>x.id===id)).filter(Boolean).map(c=>{const selected=state.receiptDraft?receiptCats.has(c.id):state.planned.includes(c.id);return '<label class="item recordItem '+(selected?'selected':'')+'" style="display:flex;gap:10px;align-items:center;margin:0;color:var(--text)"><input type="checkbox" data-rec="'+c.id+'" '+(selected?'checked':'')+'><span><b>'+c.name+'</b><span class="tiny" style="display:block">'+c.estimate+'</span></span></label>'}).join('');
- $$('[data-rec]').forEach(cb=>cb.onchange=()=>cb.closest('.recordItem')?.classList.toggle('selected',cb.checked));
- $('#history').innerHTML=state.history.slice().reverse().slice(0,8).map(h=>'<div class="item row"><div><b>'+h.store+'</b><div class="tiny">'+new Date(h.date).toLocaleDateString()+' · '+h.items.length+' categories'+(h.receiptLines?' · '+h.receiptLines+' receipt lines':'')+'</div></div><b>'+(h.total?money(h.total):'—')+'</b></div>').join('')||'<div class="item muted small">No shops recorded yet.</div>';
- applyReceiptDraft()
+function showHistoryDetail(reverseIndex){
+ const h=state.history.slice().reverse()[reverseIndex]; if(!h)return;
+ $('#historyTitle').textContent=h.store+' · '+(h.total?money(h.total):'Shop');
+ $('#historyMeta').innerHTML='<b>'+new Date(h.date).toLocaleDateString()+'</b> · '+(h.receiptLines||0)+' receipt lines · '+h.items.length+' matched household categories';
+ const products=Array.isArray(h.receiptProducts)?h.receiptProducts:[];
+ $('#historyProducts').innerHTML=products.length?products.map(p=>{
+  const cat=p.category?base.find(c=>c.id===p.category):null;
+  return '<div class="item row"><div><b>'+escapeHtml(p.name)+'</b><div class="tiny">'+(cat?'Matched to '+cat.name:'Not matched to a household category')+'</div></div><b>'+money(p.price)+'</b></div>';
+ }).join(''):'<div class="item muted small">This shop was saved before detailed receipt lines were available.</div>';
+ historyDetail.showModal();
 }
-function renderHousehold(){
- $('#budget').value=state.household.budget;$('#pattern').value=state.household.pattern;
- $('#householdSummary').innerHTML='<h3>Your setup</h3><p class="small"><b>2 adults · 2 dogs</b></p><p class="small muted">'+(state.household.pattern==='rolling'?'No fixed shopping day / shop as needed':state.household.pattern==='several'?'Several smaller shops':'One main weekly shop')+' · '+state.household.shops.join(', ')+' · '+money(state.household.budget)+'/week</p><p class="small">'+state.selected.length+' regular categories · '+state.history.length+' recorded shops</p>'
+function renderRecord(){
+ $('#store').innerHTML=shops.map(x=>'<option>'+x+'</option>').join('');
+ if(!$('#shopDate').value)$('#shopDate').value=iso(new Date());
+ const receiptCats=new Set((state.receiptDraft?.items||[]).filter(x=>x.include&&x.category).map(x=>x.category));
+ $('#recordList').innerHTML=state.selected.map(id=>base.find(x=>x.id===id)).filter(Boolean).map(c=>{
+  const selected=state.receiptDraft?receiptCats.has(c.id):state.planned.includes(c.id);
+  return '<label class="item recordItem '+(selected?'selected':'')+'" style="display:flex;gap:10px;align-items:center;margin:0;color:var(--text)"><input type="checkbox" data-rec="'+c.id+'" '+(selected?'checked':'')+'><span><b>'+c.name+'</b><span class="tiny" style="display:block">'+c.estimate+'</span></span></label>';
+ }).join('');
+ $$('[data-rec]').forEach(cb=>cb.onchange=()=>cb.closest('.recordItem')?.classList.toggle('selected',cb.checked));
+ $('#history').innerHTML=state.history.slice().reverse().slice(0,8).map((h,idx)=>{
+  const count=h.receiptLines||0;
+  return '<div class="item"><button class="historyBtn" data-history="'+idx+'"><div class="row"><div><b>'+h.store+'</b><div class="tiny">'+new Date(h.date).toLocaleDateString()+' · '+h.items.length+' categories'+(count?' · '+count+' receipt lines':'')+'</div></div><b>'+(h.total?money(h.total):'—')+'</b></div></button></div>';
+ }).join('')||'<div class="item muted small">No shops recorded yet.</div>';
+ $$('[data-history]').forEach(btn=>btn.onclick=()=>showHistoryDetail(Number(btn.dataset.history)));
+ applyReceiptDraft();
+ if(state.receiptDraft || state.planned.length) $('#manualConfirm').open=true;
+}function renderHousehold(){
+ $('#budget').value=state.household.budget;
+ $('#pattern').value=state.household.pattern;
+ const patternLabel=state.household.pattern==='rolling'?'No fixed shopping day / shop as needed':state.household.pattern==='several'?'Several smaller shops':'One main weekly shop';
+ $('#householdSummary').innerHTML='<div class="tiny">CURRENT HOUSEHOLD</div><h3 style="margin-top:4px">2 adults · 2 dogs</h3><p class="small muted">'+patternLabel+' · '+state.household.shops.join(', ')+' · '+money(state.household.budget)+'/week</p><div class="row"><span class="tag">'+state.selected.length+' regular categories</span><span class="tag">'+state.history.length+' recorded shop'+(state.history.length===1?'':'s')+'</span></div>';
+ $('#peoplePetsSummary').textContent='2 adults · 2 dogs';
+ $('#shopsSummary').textContent=state.household.shops.join(' · ');
+ $('#learningSummary').textContent=state.history.length+' recorded shop'+(state.history.length===1?'':'s')+' · '+Object.values(state.items).filter(x=>x.count>0).length+' categories seen';
 }
 function render(){renderHome();renderPlan();renderEssentials();renderRecord();renderHousehold();save()}
 $('#search').oninput=renderEssentials;
@@ -478,7 +584,7 @@ $('#resetPlan').onclick=()=>{state.held={};save();renderPlan();const s=$('#planS
 $('#usePlan').onclick=()=>{state.planned=recommendedPlanIds();save();nav('record')};
 $('#saveShop').onclick=()=>{
  try{
-  let ids=[...new Set($('[data-rec]:checked').map(x=>x.dataset.rec))];
+  let ids=[...new Set($$('[data-rec]:checked').map(x=>x.dataset.rec))];
   const d=state.receiptDraft;
   if(!ids.length&&!(d&&d.items.some(x=>x.include))){
    const status=$('#shopSaveStatus');
