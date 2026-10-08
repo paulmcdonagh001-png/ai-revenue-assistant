@@ -32,7 +32,7 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 </head>
 <body>
 <div class="app">
-<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 1.8</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
+<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 1.9</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
 <main>
 <section id="home" class="page active">
 <div class="card soft hubStatus">
@@ -69,10 +69,14 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 </section>
 
 <section id="plan" class="page">
-<h2>Shopping Plan</h2><p class="small muted">This is the robot's list, not a blank checklist for you to build.</p>
-<div class="card"><div class="notice small"><b>First-shop limitation:</b> I know the household model but not exactly what is in your cupboards today. If something is wrong, tap “Have plenty”. After real shops are recorded, this should need fewer corrections.</div></div>
+<h2>Shopping Plan</h2><p class="small muted">A short list of what the robot currently thinks is worth considering — not your whole household inventory.</p>
+<div class="card"><div class="goodbox small"><b>How this plan works:</b> items with shopping evidence can enter the plan. Things I have not seen yet stay under “Still learning” instead of being treated as things you must buy.</div></div>
 <div class="grid g3" id="planMetrics"></div>
-<div id="planStatus" class="goodbox small" style="display:none;margin-bottom:14px"></div><div class="card"><div class="row"><div><h3>Recommended next shop</h3><div class="tiny">Everything below is included unless you correct it.</div></div><button class="btn sm" id="resetPlan">Reset corrections</button></div><div id="planList" class="list"></div></div>
+<div id="planStatus" class="goodbox small" style="display:none;margin-bottom:14px"></div>
+<div class="card">
+  <div class="row"><div><h3>Recommended next shop</h3><div class="tiny" id="planSubtext">Only the strongest current suggestions.</div></div><button class="btn sm" id="resetPlan">Reset corrections</button></div>
+  <div id="planList" class="list"></div>
+</div>
 <div class="card"><button class="btn primary" style="width:100%" id="usePlan">Use this plan</button></div>
 </section>
 
@@ -149,6 +153,7 @@ function fresh(){return{household:{adults:2,children:0,dogs:2,cats:0,pattern:'ro
 let state;try{state=JSON.parse(localStorage.getItem(KEY))||fresh()}catch(e){state=fresh()}
 if(!state.receiptDraft) state.receiptDraft=null;
 if(!state.productMemory) state.productMemory={};
+state.selected=[...new Set(state.selected||[])];
 (function repairLegacyReceiptLearning(){
  try{
   let changed=false;
@@ -206,12 +211,56 @@ function renderHome(){
  $('#viewAllUpcoming').onclick=()=>nav('plan');
  $('#hubHousehold').onclick=()=>nav('household');
 }
+function starterPlanItems(){
+ const starterIds=['milk','bread','eggs','toilet','dogwet','dogdry','laundry','dishwasher','fruit','veg','coffee','squash'];
+ return starterIds.map(id=>base.find(x=>x.id===id)).filter(c=>c&&state.selected.includes(c.id)).map(c=>({c,left:null,starter:true}));
+}
+function planBuckets(){
+ const all=candidates();
+ if(!state.history.length){
+  const need=starterPlanItems();
+  const starterSet=new Set(need.map(x=>x.c.id));
+  return {need,later:[],learning:all.filter(x=>!starterSet.has(x.c.id)),mode:'starter'};
+ }
+ const seen=all.filter(x=>x.left!==null);
+ return {
+  need:seen.filter(x=>x.left<=7),
+  later:seen.filter(x=>x.left>7),
+  learning:all.filter(x=>x.left===null),
+  mode:'evidence'
+ };
+}
+function recommendedPlanIds(){
+ const b=planBuckets();
+ return b.need.filter(x=>state.held[x.c.id]!==true).map(x=>x.c.id);
+}
 function renderPlan(){
- const list=candidates(),active=list.filter(x=>state.held[x.c.id]!==true);
- $('#planMetrics').innerHTML=[['Robot recommends',active.length],['Held back',list.length-active.length],['Weekly budget',money(state.household.budget)]].map(([a,b])=>'<div class="metric"><span class="tiny">'+a+'</span><b>'+b+'</b></div>').join('');
- const groups=[...new Set(list.map(x=>x.c.group))];
- $('#planList').innerHTML=groups.map(g=>'<div class="item" style="background:var(--panel2)"><b>'+g+'</b></div>'+list.filter(x=>x.c.group===g).map(x=>{const on=!state.held[x.c.id];return '<div class="item row" style="opacity:'+(on?1:.55)+'"><div><b>'+x.c.name+'</b><div class="tiny">'+x.c.estimate+' · '+(x.left===null?'benchmark estimate':'~'+x.left+' days left')+'</div></div><button class="btn sm" data-hold="'+x.c.id+'">'+(on?'Have plenty':'Put back on')+'</button></div>'}).join('')).join('');
- $$('[data-hold]').forEach(b=>b.onclick=()=>{state.held[b.dataset.hold]=!state.held[b.dataset.hold];save();renderPlan()})
+ const b=planBuckets();
+ const active=b.need.filter(x=>state.held[x.c.id]!==true);
+ const held=b.need.length-active.length;
+ $('#planMetrics').innerHTML=[
+  ['Recommended',active.length],
+  ['Held back',held],
+  ['Still learning',b.learning.length]
+ ].map(([a,v])=>'<div class="metric"><span class="tiny">'+a+'</span><b>'+v+'</b></div>').join('');
+ $('#planSubtext').textContent=b.mode==='starter'
+  ? 'A small starter plan from household benchmarks. Real shops will replace this.'
+  : 'Based on things I have actually seen in your shopping.';
+ const needHtml=active.concat(b.need.filter(x=>state.held[x.c.id]===true)).map(x=>{
+  const on=state.held[x.c.id]!==true;
+  const reason=b.mode==='starter'?'starting household estimate':(x.left<=3?'likely needed very soon':'early estimate from your shopping');
+  return '<div class="item row" style="opacity:'+(on?1:.5)+'"><div><b>'+x.c.name+'</b><div class="tiny">'+reason+(x.left!==null?' · ~'+x.left+' days':'')+'</div></div><button class="btn sm" data-hold="'+x.c.id+'">'+(on?'Have plenty':'Put back on')+'</button></div>';
+ }).join('');
+ const laterHtml=b.later.length
+  ? '<details class="item"><summary><b>Probably okay for now ('+b.later.length+')</b><span class="tiny" style="display:block">Seen in your shopping, but not due soon.</span></summary><div style="margin-top:10px">'+b.later.slice(0,12).map(x=>'<div class="row" style="padding:7px 0"><span>'+x.c.name+'</span><span class="tiny">~'+x.left+' days</span></div>').join('')+'</div></details>'
+  : '';
+ const learningHtml=b.learning.length
+  ? '<details class="item"><summary><b>Still learning ('+b.learning.length+')</b><span class="tiny" style="display:block">Not enough real shopping evidence yet — not added to your plan.</span></summary><div class="tiny" style="margin-top:10px;line-height:1.8">'+b.learning.slice(0,20).map(x=>x.c.name).join(' · ')+(b.learning.length>20?' · …':'')+'</div></details>'
+  : '';
+ $('#planList').innerHTML=(needHtml||'<div class="item goodbox small"><b>No strong “buy now” suggestions.</b><br>Another real shop will give the robot more evidence.</div>')+laterHtml+learningHtml;
+ $$('[data-hold]').forEach(btn=>btn.onclick=()=>{state.held[btn.dataset.hold]=!state.held[btn.dataset.hold];save();renderPlan()});
+ $('#usePlan').disabled=active.length===0;
+ $('#usePlan').textContent=active.length?'Use this plan ('+active.length+')':'No items to plan yet';
 }
 function renderEssentials(){
  const q=($('#search').value||'').toLowerCase(),items=state.selected.map(id=>base.find(x=>x.id===id)).filter(c=>c&&(c.name.toLowerCase().includes(q)||c.group.toLowerCase().includes(q))),groups=[...new Set(items.map(x=>x.group))];
@@ -426,7 +475,7 @@ function renderHousehold(){
 function render(){renderHome();renderPlan();renderEssentials();renderRecord();renderHousehold();save()}
 $('#search').oninput=renderEssentials;
 $('#resetPlan').onclick=()=>{state.held={};save();renderPlan();const s=$('#planStatus');if(s){s.style.display='block';s.innerHTML='<b>Corrections reset.</b> Everything is back on the robot\'s recommended plan.'}};
-$('#usePlan').onclick=()=>{state.planned=candidates().filter(x=>!state.held[x.c.id]).map(x=>x.c.id);save();nav('record')};
+$('#usePlan').onclick=()=>{state.planned=recommendedPlanIds();save();nav('record')};
 $('#saveShop').onclick=()=>{
  try{
   let ids=[...new Set($('[data-rec]:checked').map(x=>x.dataset.rec))];
