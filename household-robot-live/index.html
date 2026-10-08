@@ -40,7 +40,7 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 </head>
 <body>
 <div class="app">
-<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 2.7</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
+<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 2.8</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
 <main>
 <section id="home" class="page active">
 <div class="card soft hubStatus">
@@ -907,11 +907,19 @@ function renderHistoryDetail(){
   const cat=p.category?base.find(c=>c.id===p.category):null;
   const suggestion=!cat&&!p.ignored?suggestedCategoryFor(p.name):null;
   const suggCat=suggestion?base.find(c=>c.id===suggestion):null;
-  return '<div class="item"><div class="row"><div style="min-width:0"><b>'+escapeHtml(p.name)+'</b><div class="tiny">'+(p.ignored?'Ignored':cat?'Matched to '+cat.name:'Needs check — not matched')+'</div></div><b>'+money(p.price)+'</b></div>'+
-   (!p.ignored&&!cat&&suggCat?'<button class="btn sm" style="margin-top:8px" data-use-suggest="'+index+'" data-cat="'+suggCat.id+'">Use '+suggCat.name+'</button>':'')+
-   '<div class="row" style="margin-top:8px"><select data-hist-cat="'+index+'" style="flex:1">'+options+'</select><button class="btn sm" data-hist-ignore="'+index+'">'+(p.ignored?'Unignore':'Ignore')+'</button></div></div>';
+  const matchedControls=cat?'<button class="btn sm" data-edit-hist="'+index+'">Edit</button>':'';
+  const unmatchedControls=!cat&&!p.ignored?(
+    (suggCat?'<button class="btn sm" data-use-suggest="'+index+'" data-cat="'+suggCat.id+'">Use '+suggCat.name+'</button>':'')+
+    '<div class="row" style="margin-top:8px"><select data-hist-cat="'+index+'" style="flex:1">'+options+'</select><button class="btn sm" data-hist-ignore="'+index+'">Ignore</button></div>'
+  ):'';
+  const editControls=cat?'<div class="row" id="histEdit'+index+'" style="margin-top:8px;display:none"><select data-hist-cat="'+index+'" style="flex:1">'+options+'</select><button class="btn sm" data-hist-ignore="'+index+'">Ignore</button></div>':'';
+  return '<div class="item"><div class="row"><div style="min-width:0"><b>'+escapeHtml(p.name)+'</b><div class="tiny">'+(p.ignored?'Ignored':cat?'Matched to '+cat.name:'Needs check — not matched')+'</div></div><div style="display:flex;align-items:center;gap:8px"><b>'+money(p.price)+'</b>'+matchedControls+'</div></div>'+unmatchedControls+editControls+'</div>';
  }).join(''):'<div class="item muted small">'+(historyDetailState.onlyChecks?'No unmatched receipt lines.':'No receipt lines stored for this shop.')+'</div>';
  $$('[data-use-suggest]').forEach(btn=>btn.onclick=()=>applyHistoricalCorrection(Number(btn.dataset.useSuggest),btn.dataset.cat));
+ $$('[data-edit-hist]').forEach(btn=>btn.onclick=()=>{
+  const box=$('#histEdit'+btn.dataset.editHist);
+  if(box)box.style.display=box.style.display==='none'?'flex':'none';
+ });
  $$('[data-hist-cat]').forEach(sel=>{
   const idx=Number(sel.dataset.histCat); const p=products[idx]; sel.value=p?.category||'';
   sel.onchange=()=>{if(sel.value)applyHistoricalCorrection(idx,sel.value)};
