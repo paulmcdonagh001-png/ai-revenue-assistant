@@ -28,11 +28,11 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 </head>
 <body>
 <div class="app">
-<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 1.6</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
+<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 1.7</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
 <main>
 <section id="home" class="page active">
 <div class="card soft"><div class="tiny">LIVE TEST</div><h3>Your household is ready</h3><p class="small muted">2 adults, 2 dogs, no fixed shopping day, Tesco + Aldi. Your changes stay saved on this web address.</p></div>
-<div class="card"><div class="row"><div><div class="tiny">HOUSEHOLD UNDERSTANDING</div><h2 id="score">22%</h2></div><div style="width:48%"><div class="bar"><i id="scoreBar" style="width:22%"></i></div><div class="tiny" style="margin-top:6px">Benchmarks first, real shopping gradually takes over</div></div></div></div>
+<div class="card"><div class="row"><div><div class="tiny">HOUSEHOLD UNDERSTANDING</div><h2 id="score">22%</h2></div><div style="width:48%"><div class="bar"><i id="scoreBar" style="width:22%"></i></div><div class="tiny" style="margin-top:6px">Benchmarks first. One shop is evidence; repeated shops build confidence.</div></div></div></div>
 <div class="grid g3" id="homeMetrics"></div>
 <div class="card"><div class="tiny">WHAT TO DO NEXT</div><h3 id="nextTitle">Use it on your next real shop</h3><p id="nextText" class="small muted">Open the Shopping Plan. The robot has already chosen what it thinks you need. Only correct obvious mistakes.</p><button class="btn primary" id="nextBtn">Open Shopping Plan</button></div>
 <div class="card"><h3>What I think is coming up</h3><div id="homePreview" class="list"></div></div>
@@ -119,8 +119,43 @@ function fresh(){return{household:{adults:2,children:0,dogs:2,cats:0,pattern:'ro
 let state;try{state=JSON.parse(localStorage.getItem(KEY))||fresh()}catch(e){state=fresh()}
 if(!state.receiptDraft) state.receiptDraft=null;
 if(!state.productMemory) state.productMemory={};
+(function repairLegacyReceiptLearning(){
+ try{
+  let changed=false;
+  for(const h of (state.history||[])){
+   if(Array.isArray(h.receiptProducts)&&h.receiptProducts.length&&Array.isArray(h.items)&&h.items.length===state.selected.length){
+    const cats=[...new Set(h.receiptProducts.map(x=>x.category).filter(Boolean))];
+    if(cats.length && cats.length<h.items.length){h.items=cats;changed=true}
+   }
+  }
+  if(changed){
+   const rebuilt={};
+   for(const h of state.history){
+    for(const id of (h.items||[])){
+     const cat=base.find(x=>x.id===id); if(!cat)continue;
+     const old=rebuilt[id]||{count:0,last:null,repeat:cat.repeat,lastStore:h.store};
+     old.count++;
+     if(!old.last || new Date(h.date)>=new Date(old.last)){old.last=h.date;old.lastStore=h.store}
+     rebuilt[id]=old;
+    }
+   }
+   state.items=rebuilt;
+   localStorage.setItem(KEY,JSON.stringify(state));
+  }
+ }catch(e){console.warn('Legacy learning repair skipped',e)}
+})();
 function save(){localStorage.setItem(KEY,JSON.stringify(state))}
-function score(){const learned=Object.values(state.items).filter(x=>x.count>0).length;return Math.min(95,22+learned*2)}
+function score(){
+ const baseScore=20;
+ const shopScore=Math.min(15,(state.history?.length||0)*3);
+ const counts=state.selected.map(id=>Number(state.items?.[id]?.count||0));
+ const evidenceAvg=counts.length?counts.reduce((s,n)=>s+Math.min(5,n)/5,0)/counts.length:0;
+ const repeatScore=Math.round(evidenceAvg*50);
+ const memories=Object.values(state.productMemory||{});
+ const repeated=memories.filter(x=>(x.count||0)>=2).length;
+ const productScore=memories.length?Math.min(10,Math.round((repeated/memories.length)*10)):0;
+ return Math.min(95,Math.round(baseScore+shopScore+repeatScore+productScore));
+}
 function daysLeft(c){const it=state.items[c.id];if(!it?.last)return null;const elapsed=Math.max(0,Math.floor((Date.now()-new Date(it.last))/86400000));return Math.max(0,(it.repeat||c.repeat)-elapsed)}
 function candidates(){return state.selected.map(id=>base.find(x=>x.id===id)).filter(Boolean).map(c=>({c,left:daysLeft(c)})).sort((a,b)=>(a.left??99)-(b.left??99))}
 function nav(name){$$('.page').forEach(x=>x.classList.remove('active'));$('#'+name).classList.add('active');$$('.nav button').forEach(x=>x.classList.toggle('active',x.dataset.page===name));render();scrollTo(0,0)}
@@ -128,7 +163,7 @@ $$('[data-page]').forEach(b=>b.onclick=()=>nav(b.dataset.page));
 function renderHome(){
  const s=score();$('#score').textContent=s+'%';$('#scoreBar').style.width=s+'%';
  const learned=Object.values(state.items).filter(x=>x.count>0).length;
- $('#homeMetrics').innerHTML=[['Regular categories',state.selected.length],['Learned',learned],['Recorded shops',state.history.length]].map(([a,b])=>'<div class="metric"><span class="tiny">'+a+'</span><b>'+b+'</b></div>').join('');
+ $('#homeMetrics').innerHTML=[['Regular categories',state.selected.length],['Seen in shops',learned],['Recorded shops',state.history.length]].map(([a,b])=>'<div class="metric"><span class="tiny">'+a+'</span><b>'+b+'</b></div>').join('');
  $('#homePreview').innerHTML=candidates().slice(0,6).map(x=>'<div class="item row"><div><b>'+x.c.name+'</b><div class="tiny">'+(x.left===null?'Starting household estimate':'about '+x.left+' days left')+'</div></div><span class="tag">'+x.c.estimate+'</span></div>').join('');
  if(state.history.length){$('#nextTitle').textContent='Keep teaching it from real shops';$('#nextText').textContent='The robot now has '+state.history.length+' recorded shop'+(state.history.length===1?'':'s')+'. Record the next one so real behaviour keeps replacing averages.';$('#nextBtn').textContent='Record a Shop';$('#nextBtn').onclick=()=>nav('record')}else{$('#nextTitle').textContent='Use it on your next real shop';$('#nextText').textContent='Open the Shopping Plan. The robot has already chosen what it thinks you need. Only correct obvious mistakes.';$('#nextBtn').textContent='Open Shopping Plan';$('#nextBtn').onclick=()=>nav('plan')}
 }
@@ -326,14 +361,21 @@ function applyReceiptDraft(){
  }).join('');
  $$('[data-rc]').forEach(sel=>{const i=Number(sel.dataset.rc);sel.value=d.items[i].category||'';sel.onchange=()=>{d.items[i].category=sel.value||null;d.items[i].confidence=sel.value?'user':'check';save();applyReceiptDraft()}});
  $$('[data-ri]').forEach(ch=>{const i=Number(ch.dataset.ri);ch.onchange=()=>{d.items[i].include=ch.checked;save()}});
- // Preselect recognised household categories in the ordinary confirmation list.
- setTimeout(()=>{d.items.filter(x=>x.include&&x.category).forEach(x=>{const cb=document.querySelector('[data-rec="'+x.category+'"]');if(cb)cb.checked=true})},0);
+ // Receipt evidence becomes the authority for this shop. Planned items are no longer assumed bought.
+ setTimeout(()=>{
+  const cats=new Set(d.items.filter(x=>x.include&&x.category).map(x=>x.category));
+  $('[data-rec]').forEach(cb=>{
+   cb.checked=cats.has(cb.dataset.rec);
+   cb.closest('.recordItem')?.classList.toggle('selected',cb.checked);
+  });
+ },0);
 }
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
 
 function renderRecord(){
  $('#store').innerHTML=shops.map(x=>'<option>'+x+'</option>').join('');if(!$('#shopDate').value)$('#shopDate').value=iso(new Date());
- $('#recordList').innerHTML=state.selected.map(id=>base.find(x=>x.id===id)).filter(Boolean).map(c=>{const selected=state.planned.includes(c.id);return '<label class="item recordItem '+(selected?'selected':'')+'" style="display:flex;gap:10px;align-items:center;margin:0;color:var(--text)"><input type="checkbox" data-rec="'+c.id+'" '+(selected?'checked':'')+'><span><b>'+c.name+'</b><span class="tiny" style="display:block">'+c.estimate+'</span></span></label>'}).join('');
+ const receiptCats=new Set((state.receiptDraft?.items||[]).filter(x=>x.include&&x.category).map(x=>x.category));
+ $('#recordList').innerHTML=state.selected.map(id=>base.find(x=>x.id===id)).filter(Boolean).map(c=>{const selected=state.receiptDraft?receiptCats.has(c.id):state.planned.includes(c.id);return '<label class="item recordItem '+(selected?'selected':'')+'" style="display:flex;gap:10px;align-items:center;margin:0;color:var(--text)"><input type="checkbox" data-rec="'+c.id+'" '+(selected?'checked':'')+'><span><b>'+c.name+'</b><span class="tiny" style="display:block">'+c.estimate+'</span></span></label>'}).join('');
  $$('[data-rec]').forEach(cb=>cb.onchange=()=>cb.closest('.recordItem')?.classList.toggle('selected',cb.checked));
  $('#history').innerHTML=state.history.slice().reverse().slice(0,8).map(h=>'<div class="item row"><div><b>'+h.store+'</b><div class="tiny">'+new Date(h.date).toLocaleDateString()+' · '+h.items.length+' categories'+(h.receiptLines?' · '+h.receiptLines+' receipt lines':'')+'</div></div><b>'+(h.total?money(h.total):'—')+'</b></div>').join('')||'<div class="item muted small">No shops recorded yet.</div>';
  applyReceiptDraft()
@@ -348,10 +390,8 @@ $('#resetPlan').onclick=()=>{state.held={};save();renderPlan();const s=$('#planS
 $('#usePlan').onclick=()=>{state.planned=candidates().filter(x=>!state.held[x.c.id]).map(x=>x.c.id);save();nav('record')};
 $('#saveShop').onclick=()=>{
  try{
-  let ids=$$('[data-rec]:checked').map(x=>x.dataset.rec);
+  let ids=[...new Set($('[data-rec]:checked').map(x=>x.dataset.rec))];
   const d=state.receiptDraft;
-  const receiptCats=d?d.items.filter(x=>x.include&&x.category).map(x=>x.category):[];
-  ids=[...new Set([...ids,...receiptCats])];
   if(!ids.length&&!(d&&d.items.some(x=>x.include))){
    const status=$('#shopSaveStatus');
    if(status){status.style.display='block';status.className='notice small';status.innerHTML='<b>Nothing to save yet.</b> Keep at least one bought item selected.'}
