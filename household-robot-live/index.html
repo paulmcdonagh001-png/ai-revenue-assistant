@@ -28,7 +28,7 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 </head>
 <body>
 <div class="app">
-<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
+<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 1.2</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
 <main>
 <section id="home" class="page active">
 <div class="card soft"><div class="tiny">LIVE TEST</div><h3>Your household is ready</h3><p class="small muted">2 adults, 2 dogs, no fixed shopping day, Tesco + Aldi. Your changes stay saved on this web address.</p></div>
@@ -74,12 +74,12 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 </div>
 <div class="card"><div class="row mobile"><div style="flex:1"><label>Shop</label><select id="store"></select></div><div style="flex:1"><label>Date</label><input id="shopDate" type="date"></div><div style="flex:1"><label>Total (£)</label><input id="shopTotal" type="number" step=".01" min="0"></div></div></div>
 <div class="card"><h3>Confirm what actually came home</h3><p class="tiny">If you arrived from Shopping Plan, planned items are preselected. Only correct the exceptions.</p><div id="recordList" class="list"></div><button class="btn primary" style="width:100%;margin-top:14px" id="saveShop">Save shop</button></div>
-<div class="card"><h3>Recent shops</h3><div id="history" class="list"></div></div>
+<div id="shopSaveStatus" class="goodbox small" style="display:none;margin-bottom:14px"></div><div class="card"><h3>Recent shops</h3><div id="history" class="list"></div></div>
 </section>
 
 <section id="household" class="page">
 <h2>Household</h2><div class="card" id="householdSummary"></div>
-<div class="card"><h3>Budget & shopping</h3><label>Weekly budget</label><input id="budget" type="number" min="1"><label style="margin-top:10px">Shopping pattern</label><select id="pattern"><option value="rolling">No fixed day / shop as needed</option><option value="several">Several smaller shops</option><option value="weekly">One main weekly shop</option></select><button class="btn primary" style="width:100%;margin-top:12px" id="saveSettings">Save</button></div>
+<div class="card"><h3>Budget & shopping</h3><div id="settingsStatus" class="goodbox small" style="display:none;margin-bottom:10px"></div><label>Weekly budget</label><input id="budget" type="number" min="1"><label style="margin-top:10px">Shopping pattern</label><select id="pattern"><option value="rolling">No fixed day / shop as needed</option><option value="several">Several smaller shops</option><option value="weekly">One main weekly shop</option></select><button class="btn primary" style="width:100%;margin-top:12px" id="saveSettings">Save</button></div>
 <div class="card"><h3>Data</h3><p class="tiny">This live test saves on this web address in your browser.</p><button class="btn" id="backup">Backup data</button></div>
 </section>
 </main>
@@ -348,7 +348,7 @@ $('#usePlan').onclick=()=>{state.planned=candidates().filter(x=>!state.held[x.c.
 $('#saveShop').onclick=()=>{let ids=$('[data-rec]:checked').map(x=>x.dataset.rec);const d=state.receiptDraft;const receiptCats=d?d.items.filter(x=>x.include&&x.category).map(x=>x.category):[];ids=[...new Set([...ids,...receiptCats])];if(!ids.length&&!(d&&d.items.some(x=>x.include))){alert('I could not find anything to save from this shop.');return}const date=$('#shopDate').value||iso(new Date()),store=$('#store').value,total=Number($('#shopTotal').value||0);ids.forEach(id=>{const c=base.find(x=>x.id===id);if(!c)return;const old=state.items[id]||{};let rep=old.repeat||c.repeat;if(old.last){const elapsed=Math.max(1,Math.floor((new Date(date)-new Date(old.last))/86400000));rep=Math.max(1,Math.round(rep*.65+elapsed*.35))}state.items[id]={count:(old.count||0)+1,last:date,repeat:rep,lastStore:store}});
  const receiptProducts=d?d.items.filter(x=>x.include).map(x=>({name:x.name,price:x.price,category:x.category||null})):[];receiptProducts.forEach(x=>{const key=x.name.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,80);const pm=state.productMemory[key]||{name:x.name,count:0,stores:{},prices:[]};pm.count++;pm.stores[store]=(pm.stores[store]||0)+1;pm.prices=(pm.prices||[]).concat([x.price]).slice(-12);pm.last=date;pm.category=x.category||pm.category||null;state.productMemory[key]=pm});
  state.history.push({date,store,total,items:ids,receiptLines:receiptProducts.length,receiptProducts});state.planned=[];state.held={};state.receiptDraft=null;$('#shopTotal').value='';$('#receiptStatus').innerHTML='';$('#ocrProgressWrap').style.display='none';save();render();alert('Shop saved. The robot learned from the receipt and updated its repeat patterns.')};
-$('#saveSettings').onclick=()=>{state.household.budget=Number($('#budget').value||80);state.household.pattern=$('#pattern').value;save();render();alert('Saved.')};
+$('#saveSettings').onclick=()=>{state.household.budget=Number($('#budget').value||80);state.household.pattern=$('#pattern').value;save();render();$('#settingsStatus').style.display='block';$('#settingsStatus').innerHTML='<b>Saved.</b> Household budget and shopping pattern updated.'};
 $('#tourBtn').onclick=()=>tour.showModal();$('#longScan').onclick=()=>scanInfo.showModal();
 $('#photoBtn').onclick=()=>$('#photoInput').click();$('#uploadBtn').onclick=()=>$('#uploadInput').click();
 $('#photoInput').onchange=e=>{const f=e.target.files?.[0];if(f)readReceipt(f)};
