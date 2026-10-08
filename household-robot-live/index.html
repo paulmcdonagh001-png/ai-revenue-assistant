@@ -40,7 +40,7 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 </head>
 <body>
 <div class="app">
-<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 2.0</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
+<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 2.1</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
 <main>
 <section id="home" class="page active">
 <div class="card soft hubStatus">
@@ -195,8 +195,10 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 </dialog>
 
 <dialog id="historyDetail">
-<div class="row"><div><div class="tiny">RECORDED SHOP</div><h2 id="historyTitle" style="margin-top:4px"></h2></div><button class="btn sm" onclick="historyDetail.close()">Close</button></div>
+<div class="row"><div><div class="tiny">RECEIPT DETAIL</div><h2 id="historyTitle" style="margin-top:4px"></h2></div><button class="btn sm" onclick="historyDetail.close()">Close</button></div>
 <div id="historyMeta" class="goodbox small" style="margin-top:10px"></div>
+<div id="historyLearned" class="card soft" style="margin-top:12px"></div>
+<div class="row" style="margin-top:14px"><div><h3 style="margin:0">Receipt lines</h3><div id="historyLineSummary" class="tiny"></div></div><button class="btn sm" id="historyOnlyChecks">Show needs check</button></div>
 <div id="historyProducts" class="list" style="margin-top:10px"></div>
 </dialog>
 
@@ -542,16 +544,35 @@ function applyReceiptDraft(){
 }
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
 
+let historyDetailState={index:null,onlyChecks:false};
 function showHistoryDetail(reverseIndex){
- const h=state.history.slice().reverse()[reverseIndex]; if(!h)return;
- $('#historyTitle').textContent=h.store+' · '+(h.total?money(h.total):'Shop');
- $('#historyMeta').innerHTML='<b>'+new Date(h.date).toLocaleDateString()+'</b> · '+(h.receiptLines||0)+' receipt lines · '+h.items.length+' matched household categories';
- const products=Array.isArray(h.receiptProducts)?h.receiptProducts:[];
- $('#historyProducts').innerHTML=products.length?products.map(p=>{
-  const cat=p.category?base.find(c=>c.id===p.category):null;
-  return '<div class="item row"><div><b>'+escapeHtml(p.name)+'</b><div class="tiny">'+(cat?'Matched to '+cat.name:'Not matched to a household category')+'</div></div><b>'+money(p.price)+'</b></div>';
- }).join(''):'<div class="item muted small">This shop was saved before detailed receipt lines were available.</div>';
+ historyDetailState={index:reverseIndex,onlyChecks:false};
+ renderHistoryDetail();
  historyDetail.showModal();
+}
+function renderHistoryDetail(){
+ const h=state.history.slice().reverse()[historyDetailState.index]; if(!h)return;
+ const products=Array.isArray(h.receiptProducts)?h.receiptProducts:[];
+ const matchedProducts=products.filter(p=>p.category);
+ const unmatchedProducts=products.filter(p=>!p.category);
+ const uniqueCats=[...new Set(matchedProducts.map(p=>p.category))];
+ const spendByCat={};
+ for(const p of matchedProducts) spendByCat[p.category]=(spendByCat[p.category]||0)+Number(p.price||0);
+ $('#historyTitle').textContent=h.store+' · '+(h.total?money(h.total):'Shop');
+ $('#historyMeta').innerHTML='<b>'+new Date(h.date).toLocaleDateString()+'</b> · '+(h.receiptLines||products.length)+' receipt lines · '+uniqueCats.length+' matched categories';
+ const learnedRows=uniqueCats.map(id=>{
+  const cat=base.find(c=>c.id===id); if(!cat)return '';
+  const count=matchedProducts.filter(p=>p.category===id).length;
+  return '<div class="row" style="padding:6px 0"><div><b>'+cat.name+'</b><div class="tiny">'+count+' receipt line'+(count===1?'':'s')+' contributed</div></div><span class="tag">'+money(spendByCat[id]||0)+'</span></div>';
+ }).join('');
+ $('#historyLearned').innerHTML='<div class="tiny">WHAT I LEARNED</div><h3 style="margin-top:4px">'+uniqueCats.length+' household categories strengthened</h3><p class="small muted">'+(uniqueCats.length?'This shop added evidence for the categories below. One shop is still early evidence, not a fixed routine.':'No household categories were confidently matched from this receipt.')+'</p>'+(learnedRows||'<div class="tiny">No matched categories yet.</div>');
+ $('#historyLineSummary').textContent=matchedProducts.length+' matched · '+unmatchedProducts.length+' need checking';
+ $('#historyOnlyChecks').textContent=historyDetailState.onlyChecks?'Show all':'Show needs check';
+ const visible=historyDetailState.onlyChecks?unmatchedProducts:products;
+ $('#historyProducts').innerHTML=visible.length?visible.map((p,i)=>{
+  const cat=p.category?base.find(c=>c.id===p.category):null;
+  return '<div class="item"><div class="row"><div style="min-width:0"><b>'+escapeHtml(p.name)+'</b><div class="tiny">'+(cat?'Matched to '+cat.name:'Needs check — not matched to a household category')+'</div></div><b>'+money(p.price)+'</b></div></div>';
+ }).join(''):'<div class="item muted small">'+(historyDetailState.onlyChecks?'No unmatched receipt lines.':'No receipt lines stored for this shop.')+'</div>';
 }
 function renderRecord(){
  $('#store').innerHTML=shops.map(x=>'<option>'+x+'</option>').join('');
@@ -564,7 +585,7 @@ function renderRecord(){
  $$('[data-rec]').forEach(cb=>cb.onchange=()=>cb.closest('.recordItem')?.classList.toggle('selected',cb.checked));
  $('#history').innerHTML=state.history.slice().reverse().slice(0,8).map((h,idx)=>{
   const count=h.receiptLines||0;
-  return '<div class="item"><button class="historyBtn" data-history="'+idx+'"><div class="row"><div><b>'+h.store+'</b><div class="tiny">'+new Date(h.date).toLocaleDateString()+' · '+h.items.length+' categories'+(count?' · '+count+' receipt lines':'')+'</div></div><b>'+(h.total?money(h.total):'—')+'</b></div></button></div>';
+  return '<div class="item"><button class="historyBtn" data-history="'+idx+'"><div class="row"><div><b>'+h.store+'</b><div class="tiny">'+new Date(h.date).toLocaleDateString()+' · '+h.items.length+' categories'+(count?' · '+count+' receipt lines':'')+' · tap to review</div></div><b>'+(h.total?money(h.total):'—')+'</b></div></button></div>';
  }).join('')||'<div class="item muted small">No shops recorded yet.</div>';
  $$('[data-history]').forEach(btn=>btn.onclick=()=>showHistoryDetail(Number(btn.dataset.history)));
  applyReceiptDraft();
@@ -580,6 +601,7 @@ function renderRecord(){
 }
 function render(){renderHome();renderPlan();renderEssentials();renderRecord();renderHousehold();save()}
 $('#search').oninput=renderEssentials;
+$('#historyOnlyChecks').onclick=()=>{historyDetailState.onlyChecks=!historyDetailState.onlyChecks;renderHistoryDetail()};
 $('#resetPlan').onclick=()=>{state.held={};save();renderPlan();const s=$('#planStatus');if(s){s.style.display='block';s.innerHTML='<b>Corrections reset.</b> Everything is back on the robot\'s recommended plan.'}};
 $('#usePlan').onclick=()=>{state.planned=recommendedPlanIds();save();nav('record')};
 $('#saveShop').onclick=()=>{
