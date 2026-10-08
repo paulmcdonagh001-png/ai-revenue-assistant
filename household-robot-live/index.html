@@ -55,14 +55,22 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 <h2>Record Shop</h2><p class="small muted">This is how the robot learns what your household actually buys.</p>
 <div class="card">
 <h3>Receipt capture</h3>
+<p class="small muted">Take or upload a clear receipt image. Reading happens on this device for the V0 test — the photo is not sent to our own server.</p>
 <div class="grid" style="grid-template-columns:1fr 1fr;gap:8px">
-<button class="btn" id="longScan"><b>Long receipt scan</b><br><span class="tiny">See how it will work</span></button>
-<button class="btn" id="photoBtn"><b>Take photo</b><br><span class="tiny">Short receipt</span></button>
-<button class="btn" id="uploadBtn" style="grid-column:1/-1"><b>Upload screenshot/order</b><br><span class="tiny">Supermarket app or online order</span></button>
+<button class="btn" id="longScan"><b>Long receipt scan</b><br><span class="tiny">Video-style sweep comes next</span></button>
+<button class="btn primary" id="photoBtn"><b>Take photo & read it</b><br><span class="tiny">Fill the frame with the receipt</span></button>
+<button class="btn" id="uploadBtn" style="grid-column:1/-1"><b>Upload receipt / screenshot</b><br><span class="tiny">Image from camera roll or supermarket app</span></button>
 </div>
-<div id="receiptStatus" class="tiny" style="margin-top:10px"></div>
+<div id="receiptStatus" class="small" style="margin-top:12px"></div>
+<div id="ocrProgressWrap" style="display:none;margin-top:10px"><div class="bar"><i id="ocrProgress" style="width:0%"></i></div><div id="ocrProgressText" class="tiny" style="margin-top:5px"></div></div>
 <input id="photoInput" type="file" accept="image/*" capture="environment" hidden>
-<input id="uploadInput" type="file" accept="image/*,application/pdf" hidden>
+<input id="uploadInput" type="file" accept="image/*" hidden>
+</div>
+<div class="card" id="receiptReviewCard" style="display:none">
+<div class="row"><div><h3>Receipt read</h3><div id="receiptSummary" class="tiny"></div></div><button class="btn sm" id="clearReceipt">Clear</button></div>
+<div id="receiptMeta" class="goodbox small" style="margin-top:10px"></div>
+<div id="receiptItems" class="list"></div>
+<p class="tiny" style="margin-top:12px">Green/labelled matches are accepted automatically. Only change lines I have not understood correctly.</p>
 </div>
 <div class="card"><div class="row mobile"><div style="flex:1"><label>Shop</label><select id="store"></select></div><div style="flex:1"><label>Date</label><input id="shopDate" type="date"></div><div style="flex:1"><label>Total (£)</label><input id="shopTotal" type="number" step=".01" min="0"></div></div></div>
 <div class="card"><h3>Confirm what actually came home</h3><p class="tiny">If you arrived from Shopping Plan, planned items are preselected. Only correct the exceptions.</p><div id="recordList" class="list"></div><button class="btn primary" style="width:100%;margin-top:14px" id="saveShop">Save shop</button></div>
@@ -92,10 +100,11 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 <dialog id="scanInfo">
 <h2>Long receipt scan</h2>
 <p class="small muted">The finished version will let you make one slow top-to-bottom camera sweep. The app will automatically keep sharp overlapping frames and read the whole receipt.</p>
-<div class="notice small"><b>Not active in this V0 yet.</b> For this live test, use a normal photo or upload a supermarket screenshot/order.</div>
+<div class="notice small"><b>Video sweep is not active yet.</b> Receipt photo reading <b>is</b> now active. For a long receipt, first try one close photo with the receipt filling as much of the frame as possible. The next scanner step is the one-sweep video capture.</div>
 <button class="btn primary" style="width:100%;margin-top:12px" onclick="scanInfo.close()">Close</button>
 </dialog>
 
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script>
 const KEY='householdRobotLiveV0';
 const shops=['Tesco','Aldi',"Sainsbury's",'Asda','Morrisons','Waitrose','Ocado','Lidl','Other'];
@@ -106,8 +115,10 @@ const suggested=new Set(['milk','bread','eggs','cheese','butter','cereal','coffe
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 const iso=d=>{const x=new Date(d);x.setMinutes(x.getMinutes()-x.getTimezoneOffset());return x.toISOString().slice(0,10)};
 const money=n=>'£'+Number(n||0).toFixed(2);
-function fresh(){return{household:{adults:2,children:0,dogs:2,cats:0,pattern:'rolling',budget:80,shops:['Tesco','Aldi']},selected:[...suggested],items:{},history:[],held:{},planned:[]}}
+function fresh(){return{household:{adults:2,children:0,dogs:2,cats:0,pattern:'rolling',budget:80,shops:['Tesco','Aldi']},selected:[...suggested],items:{},history:[],held:{},planned:[],receiptDraft:null,productMemory:{}}}
 let state;try{state=JSON.parse(localStorage.getItem(KEY))||fresh()}catch(e){state=fresh()}
+if(!state.receiptDraft) state.receiptDraft=null;
+if(!state.productMemory) state.productMemory={};
 function save(){localStorage.setItem(KEY,JSON.stringify(state))}
 function score(){const learned=Object.values(state.items).filter(x=>x.count>0).length;return Math.min(95,22+learned*2)}
 function daysLeft(c){const it=state.items[c.id];if(!it?.last)return null;const elapsed=Math.max(0,Math.floor((Date.now()-new Date(it.last))/86400000));return Math.max(0,(it.repeat||c.repeat)-elapsed)}
@@ -132,10 +143,199 @@ function renderEssentials(){
  const q=($('#search').value||'').toLowerCase(),items=state.selected.map(id=>base.find(x=>x.id===id)).filter(c=>c&&(c.name.toLowerCase().includes(q)||c.group.toLowerCase().includes(q))),groups=[...new Set(items.map(x=>x.group))];
  $('#essentialGroups').innerHTML=groups.map(g=>'<div class="card"><h3>'+g+'</h3><div class="list">'+items.filter(x=>x.group===g).map(c=>{const it=state.items[c.id];return '<div class="item"><b>'+c.name+'</b><div class="tiny">'+c.estimate+(it?.last?' · last recorded '+new Date(it.last).toLocaleDateString():' · benchmark starting point')+'</div></div>'}).join('')+'</div></div>').join('')
 }
+
+const categoryRules=[
+ ['milk',/\bMILK\b|SEMI[\s-]*SKIM|SKIMMED|WHOLE\s*MILK/i],
+ ['bread',/\bBREAD\b|\bLOAF\b|\bROLLS?\b|BAGUETTE/i],
+ ['eggs',/\bEGGS?\b/i],
+ ['cheese',/CHEESE|CHEDDAR|MOZZARELLA|PARMESAN|BRIE|STILTON/i],
+ ['butter',/\bBUTTER\b|\bSPREAD\b|MARGARINE/i],
+ ['yoghurt',/YOGH?URT|FROMAGE/i],
+ ['cereal',/CEREAL|OATS|PORRIDGE|GRANOLA|WEETABIX/i],
+ ['coffee',/COFFEE|NESCAF|K(EN)?CO|LAVAZZA/i],
+ ['tea',/\bTEA\b|TEABAGS?/i],
+ ['squash',/SQUASH|CORDIAL|RIBENA|ROBINSON/i],
+ ['rice',/\bRICE\b/i],
+ ['pasta',/PASTA|NOODLE|SPAGHETTI|PENNE|FUSILLI/i],
+ ['potatoes',/POTATO|SPUD/i],
+ ['chicken',/CHICKEN/i],
+ ['beef',/\bBEEF\b|STEAK|BRISKET/i],
+ ['pork',/\bPORK\b|BACON|GAMMON/i],
+ ['lamb',/\bLAMB\b/i],
+ ['turkey',/\bTURKEY\b/i],
+ ['fish',/\bFISH\b|SALMON|COD\b|HADDOCK|TUNA|PRAWN|SEAFOOD|MACKEREL|SARDINE/i],
+ ['veggie',/TOFU|TEMPEH|QUORN|VEGAN|VEGETARIAN|MEAT[\s-]*FREE|PLANT[\s-]*BASED/i],
+ ['fruit',/APPLE|BANANA|ORANGE|GRAPE|BERRY|BERRIES|STRAWB|BLUEB|RASPB|PEAR|MELON|MANGO|PEACH|PLUM|LEMON|LIME|KIWI|AVOCADO/i],
+ ['veg',/CARROT|BROCC|COURGETTE|PEPPER|ONION|TOMATO|CUCUMBER|LETTUCE|SPINACH|MUSHROOM|CABBAGE|CAULIF|BEANS|PEAS|SWEETCORN|AUBERGINE|CELERY/i],
+ ['frozen',/FROZEN|ICE\s*CREAM/i],
+ ['tinned',/TINNED|CANNED|BAKED\s*BEANS|CHOPPED\s*TOM|SOUP\b/i],
+ ['toilet',/TOILET\s*(ROLL|TISSUE)|BATHROOM\s*TISSUE/i],
+ ['kitchen',/KITCHEN\s*ROLL|KITCHEN\s*TOWEL/i],
+ ['laundry',/LAUNDRY|DETERGENT|WASH\s*CAP|FABRIC\s*COND|PERSIL|ARIEL|BOLD\b/i],
+ ['dishwasher',/DISHWASH|FINISH\s*(TAB|POWER)|FAIRY\s*DISH/i],
+ ['washingup',/WASHING[\s-]*UP|FAIRY\s*LIQUID/i],
+ ['bags',/BIN\s*BAG|REFUSE\s*SACK|RUBBISH\s*BAG/i],
+ ['cleaner',/CLEANER|BLEACH|DISINFECT|CIF\b|DETTOL|TOILET\s*CLEAN/i],
+ ['toothpaste',/TOOTHPASTE|COLGATE|SENSODYNE|ORAL[\s-]*B/i],
+ ['shampoo',/SHAMPOO/i],
+ ['shower',/SHOWER\s*GEL|BODY\s*WASH/i],
+ ['deodorant',/DEODORANT|ANTI[\s-]*PERSP/i],
+ ['poobags',/POO\s*BAG|DOG\s*BAG/i],
+ ['dogtreats',/DOG\s*TREAT|DENTASTIX|DENTAL\s*CHEW|DOG\s*CHEW/i],
+ ['dogdry',/DOG\s*(DRY|KIBBLE|BISCUIT)|KIBBLE/i],
+ ['dogwet',/DOG\s*(FOOD|TIN|POUCH|WET)|PEDIGREE|CESAR\b|BUTCHER'?S/i]
+];
+const receiptExclusions=/BALANCE\s+DUE|TOTAL\s+DUE|GRAND\s+TOTAL|SUB\s*TOTAL|PAYMENT|VISA|MASTERCARD|CHANGE\b|SAVINGS?|PROMOTION|PRICE\s+SAVING|NECTAR\s+PRICE|POINTS?|AUTH\b|AID\b|PAN\b|MERCHANT|CARD\b|VAT\b|COUPON|DISCOUNT|RECEIPT|THANK\s+YOU|CUSTOMER|TILL\b|CASH\b/i;
+
+function categoryFor(name){
+ for(const [id,re] of categoryRules) if(re.test(name)) return id;
+ return null;
+}
+function storeFromText(text){
+ const t=text.toUpperCase();
+ if(/SAINSBURY|NECTAR/.test(t))return "Sainsbury's";
+ if(/\bTESCO\b/.test(t))return "Tesco";
+ if(/\bALDI\b/.test(t))return "Aldi";
+ if(/\bLIDL\b/.test(t))return "Lidl";
+ if(/\bASDA\b/.test(t))return "Asda";
+ if(/MORRISONS?/.test(t))return "Morrisons";
+ if(/\bWAITROSE\b/.test(t))return "Waitrose";
+ if(/\bOCADO\b/.test(t))return "Ocado";
+ return null;
+}
+function receiptDateFromText(text){
+ const m=text.match(/\b([0-3]?\d)[\/.-]([01]?\d)[\/.-](20\d{2}|\d{2})\b/);
+ if(!m)return null;
+ let y=Number(m[3]); if(y<100)y+=2000;
+ const d=Number(m[1]),mo=Number(m[2]);
+ if(d<1||d>31||mo<1||mo>12)return null;
+ return y+'-'+String(mo).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+}
+function amounts(line){
+ return [...line.matchAll(/(?:£\s*)?(-?\d{1,4}(?:,\d{3})*\.\d{2})\b/g)].map(m=>Number(m[1].replace(',','')));
+}
+function totalFromLines(lines){
+ for(let i=0;i<lines.length;i++){
+  if(/BALANCE\s+DUE|TOTAL\s+DUE|GRAND\s+TOTAL|AMOUNT\s+DUE/i.test(lines[i])){
+   const here=amounts(lines[i]); if(here.length)return Math.max(...here.filter(x=>x>0));
+   if(lines[i+1]){const next=amounts(lines[i+1]);if(next.length)return Math.max(...next.filter(x=>x>0))}
+  }
+ }
+ const vals=lines.flatMap(amounts).filter(x=>x>0&&x<1000);
+ return vals.length?Math.max(...vals):0;
+}
+function parseReceiptText(text){
+ const lines=text.split(/\r?\n/).map(x=>x.replace(/\s+/g,' ').trim()).filter(Boolean);
+ const items=[];
+ for(let i=0;i<lines.length;i++){
+  let line=lines[i],desc=null,price=null;
+  let m=line.match(/^(.{3,}?)\s+£?\s*(-?\d{1,4}\.\d{2})\s*$/);
+  if(m){desc=m[1].trim();price=Number(m[2])}
+  else if(i+1<lines.length && /^£?\s*-?\d{1,4}\.\d{2}\s*$/.test(lines[i+1]) && line.length>=4){
+   desc=line;price=Number(lines[i+1].replace(/[£\s]/g,''));i++;
+  }
+  if(!desc||!Number.isFinite(price)||price<=0)continue;
+  if(receiptExclusions.test(desc))continue;
+  if(desc.length<3||/^[\d\s*#.-]+$/.test(desc))continue;
+  desc=desc.replace(/^[*#\s]+/,'').replace(/\s{2,}/g,' ').trim();
+  const cat=categoryFor(desc);
+  items.push({id:'r'+items.length,name:desc,price,category:cat,include:true,confidence:cat?'matched':'check'});
+ }
+ // Remove likely duplicates from OCR noise while preserving repeated genuinely identical items when prices differ.
+ const seen=new Set(),dedup=[];
+ for(const it of items){
+  const key=it.name.toUpperCase().replace(/[^A-Z0-9]/g,'')+'|'+it.price.toFixed(2);
+  if(seen.has(key))continue; seen.add(key);dedup.push(it);
+ }
+ return {store:storeFromText(text),date:receiptDateFromText(text),total:totalFromLines(lines),items:dedup};
+}
+async function imageFromFile(file){
+ if('createImageBitmap' in window)return await createImageBitmap(file);
+ return await new Promise((resolve,reject)=>{const img=new Image(),url=URL.createObjectURL(file);img.onload=()=>{URL.revokeObjectURL(url);resolve(img)};img.onerror=reject;img.src=url});
+}
+async function prepareReceiptImage(file){
+ const img=await imageFromFile(file),w=img.width,h=img.height;
+ const detect=document.createElement('canvas'),scale=Math.min(1,900/Math.max(w,h));
+ detect.width=Math.max(1,Math.round(w*scale));detect.height=Math.max(1,Math.round(h*scale));
+ const dx=detect.getContext('2d',{willReadFrequently:true});dx.drawImage(img,0,0,detect.width,detect.height);
+ const data=dx.getImageData(0,0,detect.width,detect.height).data;
+ let minX=detect.width,minY=detect.height,maxX=0,maxY=0,count=0;
+ for(let y=0;y<detect.height;y+=3)for(let x=0;x<detect.width;x+=3){
+  const k=(y*detect.width+x)*4,r=data[k],g=data[k+1],b=data[k+2],mx=Math.max(r,g,b),mn=Math.min(r,g,b);
+  if(mn>185 && mx-mn<38){minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);count++}
+ }
+ let sx=0,sy=0,sw=w,sh=h;
+ const boxW=maxX-minX,boxH=maxY-minY;
+ if(count>150 && boxW>detect.width*.12 && boxH>detect.height*.25){
+  const pad=18;
+  minX=Math.max(0,minX-pad);minY=Math.max(0,minY-pad);maxX=Math.min(detect.width,maxX+pad);maxY=Math.min(detect.height,maxY+pad);
+  sx=Math.round(minX/scale);sy=Math.round(minY/scale);sw=Math.round((maxX-minX)/scale);sh=Math.round((maxY-minY)/scale);
+ }
+ let outW=1200,outH=Math.round(sh*(outW/sw));
+ if(outH>4800){outH=4800;outW=Math.round(sw*(outH/sh))}
+ if(outW>w*2.5){outW=Math.round(w*2.5);outH=Math.round(sh*(outW/sw))}
+ const out=document.createElement('canvas');out.width=Math.max(600,outW);out.height=Math.max(600,outH);
+ const ox=out.getContext('2d',{willReadFrequently:true});ox.drawImage(img,sx,sy,sw,sh,0,0,out.width,out.height);
+ const od=ox.getImageData(0,0,out.width,out.height),p=od.data;
+ for(let i=0;i<p.length;i+=4){
+  let g=.299*p[i]+.587*p[i+1]+.114*p[i+2];
+  g=Math.max(0,Math.min(255,(g-128)*1.35+128));
+  p[i]=p[i+1]=p[i+2]=g;
+ }
+ ox.putImageData(od,0,0);
+ return await new Promise(resolve=>out.toBlob(resolve,'image/jpeg',.92));
+}
+function setOcrProgress(pct,text){
+ $('#ocrProgressWrap').style.display='block';$('#ocrProgress').style.width=Math.max(0,Math.min(100,pct))+'%';$('#ocrProgressText').textContent=text||'';
+}
+async function readReceipt(file){
+ if(!file)return;
+ if(!window.Tesseract){$('#receiptStatus').innerHTML='<div class="notice"><b>Receipt reader did not load.</b><br>Check your connection and try again.</div>';return}
+ $('#receiptReviewCard').style.display='none';$('#receiptStatus').innerHTML='<b>Preparing receipt…</b>';setOcrProgress(4,'Improving crop and contrast…');
+ try{
+  const prepared=await prepareReceiptImage(file);
+  setOcrProgress(8,'Starting text recognition…');
+  const result=await Tesseract.recognize(prepared,'eng',{logger:m=>{
+   if(m.status==='recognizing text')setOcrProgress(10+Math.round((m.progress||0)*85),'Reading receipt… '+Math.round((m.progress||0)*100)+'%');
+   else if(m.status)setOcrProgress(8,m.status.replace(/^\w/,x=>x.toUpperCase())+'…');
+  }});
+  const draft=parseReceiptText(result.data.text||'');
+  state.receiptDraft=draft;save();
+  applyReceiptDraft();
+  setOcrProgress(100,'Receipt reading complete');
+  $('#receiptStatus').innerHTML='<b>Receipt read.</b> Review only anything marked “Needs check”.';
+ }catch(err){
+  console.error(err);setOcrProgress(0,'');
+  $('#ocrProgressWrap').style.display='none';
+  $('#receiptStatus').innerHTML='<div class="notice"><b>I could not read that receipt reliably.</b><br>Try a closer, straighter photo with the receipt filling most of the frame.</div>';
+ }
+}
+function applyReceiptDraft(){
+ const d=state.receiptDraft;if(!d){$('#receiptReviewCard').style.display='none';return}
+ $('#receiptReviewCard').style.display='block';
+ const matched=d.items.filter(x=>x.category).length,uncertain=d.items.length-matched;
+ $('#receiptSummary').textContent=d.items.length+' purchase lines found · '+matched+' matched automatically · '+uncertain+' need checking';
+ if(d.store){$('#store').value=d.store}
+ if(d.date){$('#shopDate').value=d.date}
+ if(d.total){$('#shopTotal').value=d.total.toFixed(2)}
+ $('#receiptMeta').innerHTML='<b>'+(d.store||'Retailer not recognised')+'</b> · '+(d.date?new Date(d.date+'T12:00:00').toLocaleDateString():'date not found')+' · '+(d.total?money(d.total):'total not found');
+ const options='<option value="">Other / one-off</option>'+base.map(c=>'<option value="'+c.id+'">'+c.name+'</option>').join('');
+ $('#receiptItems').innerHTML=d.items.map((it,i)=>{
+  const cat=it.category?base.find(c=>c.id===it.category):null;
+  return '<div class="item"><div class="row"><label style="display:flex;gap:10px;align-items:flex-start;margin:0;color:var(--text);flex:1"><input type="checkbox" data-ri="'+i+'" '+(it.include?'checked':'')+' style="width:22px;min-height:22px"><span><b>'+escapeHtml(it.name)+'</b><span class="tiny" style="display:block">'+money(it.price)+'</span></span></label><span class="tag '+(cat?'':'')+'">'+(cat?'Matched':'Needs check')+'</span></div><div style="margin-top:8px"><select data-rc="'+i+'">'+options+'</select></div></div>'
+ }).join('');
+ $('[data-rc]').forEach(sel=>{const i=Number(sel.dataset.rc);sel.value=d.items[i].category||'';sel.onchange=()=>{d.items[i].category=sel.value||null;d.items[i].confidence=sel.value?'user':'check';save();applyReceiptDraft()}});
+ $('[data-ri]').forEach(ch=>{const i=Number(ch.dataset.ri);ch.onchange=()=>{d.items[i].include=ch.checked;save()}});
+ // Preselect recognised household categories in the ordinary confirmation list.
+ setTimeout(()=>{d.items.filter(x=>x.include&&x.category).forEach(x=>{const cb=document.querySelector('[data-rec="'+x.category+'"]');if(cb)cb.checked=true})},0);
+}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]))}
+
 function renderRecord(){
  $('#store').innerHTML=shops.map(x=>'<option>'+x+'</option>').join('');if(!$('#shopDate').value)$('#shopDate').value=iso(new Date());
  $('#recordList').innerHTML=state.selected.map(id=>base.find(x=>x.id===id)).filter(Boolean).map(c=>'<label class="item" style="display:flex;gap:10px;align-items:center;margin:0;color:var(--text)"><input type="checkbox" data-rec="'+c.id+'" style="width:22px;min-height:22px" '+(state.planned.includes(c.id)?'checked':'')+'><span><b>'+c.name+'</b><span class="tiny" style="display:block">'+c.estimate+'</span></span></label>').join('');
- $('#history').innerHTML=state.history.slice().reverse().slice(0,8).map(h=>'<div class="item row"><div><b>'+h.store+'</b><div class="tiny">'+new Date(h.date).toLocaleDateString()+' · '+h.items.length+' categories</div></div><b>'+(h.total?money(h.total):'—')+'</b></div>').join('')||'<div class="item muted small">No shops recorded yet.</div>'
+ $('#history').innerHTML=state.history.slice().reverse().slice(0,8).map(h=>'<div class="item row"><div><b>'+h.store+'</b><div class="tiny">'+new Date(h.date).toLocaleDateString()+' · '+h.items.length+' categories'+(h.receiptLines?' · '+h.receiptLines+' receipt lines':'')+'</div></div><b>'+(h.total?money(h.total):'—')+'</b></div>').join('')||'<div class="item muted small">No shops recorded yet.</div>';
+ applyReceiptDraft()
 }
 function renderHousehold(){
  $('#budget').value=state.household.budget;$('#pattern').value=state.household.pattern;
@@ -145,14 +345,15 @@ function render(){renderHome();renderPlan();renderEssentials();renderRecord();re
 $('#search').oninput=renderEssentials;
 $('#resetPlan').onclick=()=>{state.held={};save();renderPlan()};
 $('#usePlan').onclick=()=>{state.planned=candidates().filter(x=>!state.held[x.c.id]).map(x=>x.c.id);save();nav('record')};
-$('#saveShop').onclick=()=>{const ids=$$('[data-rec]:checked').map(x=>x.dataset.rec);if(!ids.length){alert('Select at least one thing that actually came home.');return}const date=$('#shopDate').value||iso(new Date()),store=$('#store').value,total=Number($('#shopTotal').value||0);ids.forEach(id=>{const c=base.find(x=>x.id===id),old=state.items[id]||{};let rep=old.repeat||c.repeat;if(old.last){const elapsed=Math.max(1,Math.floor((new Date(date)-new Date(old.last))/86400000));rep=Math.max(1,Math.round(rep*.65+elapsed*.35))}state.items[id]={count:(old.count||0)+1,last:date,repeat:rep,lastStore:store}});state.history.push({date,store,total,items:ids});state.planned=[];state.held={};$('#shopTotal').value='';save();render();alert('Shop saved. The robot has updated its repeat patterns.')};
+$('#saveShop').onclick=()=>{let ids=$('[data-rec]:checked').map(x=>x.dataset.rec);const d=state.receiptDraft;const receiptCats=d?d.items.filter(x=>x.include&&x.category).map(x=>x.category):[];ids=[...new Set([...ids,...receiptCats])];if(!ids.length&&!(d&&d.items.some(x=>x.include))){alert('I could not find anything to save from this shop.');return}const date=$('#shopDate').value||iso(new Date()),store=$('#store').value,total=Number($('#shopTotal').value||0);ids.forEach(id=>{const c=base.find(x=>x.id===id);if(!c)return;const old=state.items[id]||{};let rep=old.repeat||c.repeat;if(old.last){const elapsed=Math.max(1,Math.floor((new Date(date)-new Date(old.last))/86400000));rep=Math.max(1,Math.round(rep*.65+elapsed*.35))}state.items[id]={count:(old.count||0)+1,last:date,repeat:rep,lastStore:store}});
+ const receiptProducts=d?d.items.filter(x=>x.include).map(x=>({name:x.name,price:x.price,category:x.category||null})):[];receiptProducts.forEach(x=>{const key=x.name.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,80);const pm=state.productMemory[key]||{name:x.name,count:0,stores:{},prices:[]};pm.count++;pm.stores[store]=(pm.stores[store]||0)+1;pm.prices=(pm.prices||[]).concat([x.price]).slice(-12);pm.last=date;pm.category=x.category||pm.category||null;state.productMemory[key]=pm});
+ state.history.push({date,store,total,items:ids,receiptLines:receiptProducts.length,receiptProducts});state.planned=[];state.held={};state.receiptDraft=null;$('#shopTotal').value='';$('#receiptStatus').innerHTML='';$('#ocrProgressWrap').style.display='none';save();render();alert('Shop saved. The robot learned from the receipt and updated its repeat patterns.')};
 $('#saveSettings').onclick=()=>{state.household.budget=Number($('#budget').value||80);state.household.pattern=$('#pattern').value;save();render();alert('Saved.')};
 $('#tourBtn').onclick=()=>tour.showModal();$('#longScan').onclick=()=>scanInfo.showModal();
 $('#photoBtn').onclick=()=>$('#photoInput').click();$('#uploadBtn').onclick=()=>$('#uploadInput').click();
-$('#photoInput').onchange=e=>{$('#receiptStatus').innerHTML=e.target.files?.[0]?'<b>Photo attached:</b> '+e.target.files[0].name+'<br>This V0 does not extract the basket automatically yet.':'';
-};
-$('#uploadInput').onchange=e=>{$('#receiptStatus').innerHTML=e.target.files?.[0]?'<b>Upload attached:</b> '+e.target.files[0].name+'<br>This V0 does not extract the basket automatically yet.':'';
-};
+$('#photoInput').onchange=e=>{const f=e.target.files?.[0];if(f)readReceipt(f)};
+$('#uploadInput').onchange=e=>{const f=e.target.files?.[0];if(f)readReceipt(f)};
+$('#clearReceipt').onclick=()=>{state.receiptDraft=null;save();$('#receiptReviewCard').style.display='none';$('#receiptStatus').innerHTML='';$('#ocrProgressWrap').style.display='none';};
 $('#backup').onclick=()=>{const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='household-robot-live-backup.json';a.click();URL.revokeObjectURL(a.href)};
 $('#today').textContent=new Date().toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'long'});render();
 </script>
