@@ -40,7 +40,7 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 </head>
 <body>
 <div class="app">
-<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 2.2</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
+<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 2.3</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
 <main>
 <section id="home" class="page active">
 <div class="card soft hubStatus">
@@ -257,22 +257,35 @@ state.selected=[...new Set(state.selected||[])];
    if(!Array.isArray(h.receiptProducts))continue;
    const kept=[];
    for(const p of h.receiptProducts){
-    if(receiptExclusions.test(p.name||'')){changed=true;continue}
     const key=productKey(p.name);
     const mem=state.productMemory?.[key];
     if(mem?.userCorrected){
-      p.ignored=!!mem.ignored;
-      p.category=mem.ignored?null:(mem.category||null);
-    }else{
-      const next=categoryFor(p.name);
-      if(next!==p.category){p.category=next;changed=true}
+     p.ignored=!!mem.ignored;
+     p.category=mem.ignored?null:(mem.category||null);
+     if(!p.ignored)kept.push(p); else changed=true;
+     continue;
     }
+    const auto=automaticCategoryFor(p.name);
+    if(auto==='__ignore__'){changed=true;continue}
+    p.ignored=false;
+    const next=auto||null;
+    if(next!==p.category){p.category=next;changed=true}
     kept.push(p);
    }
-   if(kept.length!==h.receiptProducts.length){h.receiptProducts=kept;h.receiptLines=kept.length}
-   h.items=[...new Set(kept.filter(p=>!p.ignored&&p.category).map(p=>p.category))];
+   if(kept.length!==h.receiptProducts.length){h.receiptProducts=kept;h.receiptLines=kept.length;changed=true}
+   const nextItems=[...new Set(kept.filter(p=>p.category).map(p=>p.category))];
+   if(JSON.stringify(nextItems)!==JSON.stringify(h.items||[])){h.items=nextItems;changed=true}
   }
-  if(changed){rebuildEvidenceFromHistory();localStorage.setItem(KEY,JSON.stringify(state))}
+  for(const [key,pm] of Object.entries(state.productMemory||{})){
+   if(!pm?.userCorrected && (pm?.category||pm?.ignored)){
+    delete state.productMemory[key];
+    changed=true;
+   }
+  }
+  if(changed){
+   rebuildEvidenceFromHistory();
+   localStorage.setItem(KEY,JSON.stringify(state));
+  }
  }catch(e){console.warn('Receipt reclassification skipped',e)}
 })();
 
@@ -429,17 +442,34 @@ const productNonCategoryPatterns=[
 function productKey(name){return String(name||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,100)}
 function rememberedCategory(name){
  const pm=state?.productMemory?.[productKey(name)];
- if(pm?.ignored)return '__ignore__';
- if(pm?.category)return pm.category;
+ if(!pm?.userCorrected)return null;
+ if(pm.ignored)return '__ignore__';
+ if(pm.category)return pm.category;
+ return null;
+}
+function automaticCategoryFor(name){
+ const n=String(name||'').toUpperCase();
+ if(/ORIGINAL\s+PRICE|PROMOT(?:ION|IONS)?|NECTAR\s+PRICE|PRICE\s+SAVING/.test(n))return '__ignore__';
+ if(/MILK\s+ROLLS?/.test(n))return null;
+ if(/EGG\s+BITES?/.test(n))return null;
+ if(/SAGE\s*&?\s*ONION\s+STUFF/.test(n))return null;
+ if(/VEG\s+SPRING\s+ROLLS?/.test(n))return 'veggie';
+ if(/SRDNE|SARDINE/.test(n))return 'fish';
+ if(/CRISPY.*(?:LEMN|LEMON).*CH(?:I)?CKN|CHCKN|CHKN/.test(n))return 'chicken';
+ if(/SKIM.*MILK|MILK\s+2\.272L|MILK\s+\d+(?:\.\d+)?L/.test(n))return 'milk';
+ if(/LEEKS?/.test(n))return 'veg';
+ if(/COFFEE|\bCAFE\b/.test(n))return 'coffee';
+ if(/FISH\s*BITES?/.test(n))return 'fish';
+ if(receiptExclusions.test(n))return '__ignore__';
+ if(productNonCategoryPatterns.some(re=>re.test(n)))return null;
+ for(const [id,re] of categoryRules) if(re.test(n)) return id;
  return null;
 }
 function categoryFor(name){
  const remembered=rememberedCategory(name);
  if(remembered)return remembered==='__ignore__'?null:remembered;
- if(receiptExclusions.test(name))return null;
- if(productNonCategoryPatterns.some(re=>re.test(name)))return null;
- for(const [id,re] of categoryRules) if(re.test(name)) return id;
- return null;
+ const auto=automaticCategoryFor(name);
+ return auto==='__ignore__'?null:auto;
 }
 function storeFromText(text){
  const t=text.toUpperCase();
@@ -488,6 +518,7 @@ function parseReceiptText(text){
   if(receiptExclusions.test(desc))continue;
   if(desc.length<3||/^[\d\s*#.-]+$/.test(desc))continue;
   desc=desc.replace(/^[*#\s]+/,'').replace(/\s{2,}/g,' ').trim();
+  if(automaticCategoryFor(desc)==='__ignore__')continue;
   const cat=categoryFor(desc);
   items.push({id:'r'+items.length,name:desc,price,category:cat,include:true,confidence:cat?'matched':'check'});
  }
@@ -625,13 +656,8 @@ function rebuildEvidenceFromHistory(){
  state.items=rebuilt;
 }
 function suggestedCategoryFor(name){
- const n=String(name||'');
- if(/SKIM.*MILK|MILK\s+\d/i.test(n))return 'milk';
- if(/LEEKS?/i.test(n))return 'veg';
- if(/COFFEE|CAFE/i.test(n))return 'coffee';
- if(/CHCKN|CHICKEN|CHKN/i.test(n))return 'chicken';
- if(/SRDNE|SARDINE|FISH\s*BITES?/i.test(n))return 'fish';
- return categoryFor(n);
+ const auto=automaticCategoryFor(name);
+ return auto==='__ignore__'?null:auto;
 }
 function renderHistoryDetail(){
  const h=state.history.slice().reverse()[historyDetailState.index]; if(!h)return;
