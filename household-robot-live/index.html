@@ -22,20 +22,50 @@ input,select{width:100%;min-height:44px;border:1px solid var(--line);border-radi
 .nav{position:fixed;bottom:0;left:0;right:0;z-index:30;background:rgba(11,16,32,.98);border-top:1px solid var(--line);display:flex;justify-content:center;padding-bottom:max(8px,env(safe-area-inset-bottom))}
 .navinner{display:grid;grid-template-columns:repeat(5,1fr);width:min(760px,100%)}.nav button{border:0;background:transparent;color:var(--muted);padding:10px 4px;font-size:11px;min-height:58px}.nav button.active{color:var(--text);font-weight:700}
 .bar{height:10px;background:#0a1120;border:1px solid var(--line);border-radius:99px;overflow:hidden}.bar>i{display:block;height:100%;background:var(--accent)}
+.hubGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:14px}
+.hubCard{min-height:132px;text-align:left;border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:16px;padding:16px;display:flex;flex-direction:column;justify-content:space-between;gap:12px}
+.hubCard:active{transform:scale(.99)}.hubCard b{display:block;font-size:17px}.hubCard small{display:block;color:var(--muted);font-size:12px;line-height:1.35;margin-top:4px}.hubIcon{font-size:26px}.hubScore{text-align:right}.hubScore b{display:block;font-size:30px;margin-top:2px}.hubStatus{padding-bottom:15px}
+@media(max-width:420px){.hubGrid{gap:10px}.hubCard{min-height:122px;padding:14px}.hubCard b{font-size:16px}}
 dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);border-radius:16px;width:min(680px,calc(100% - 24px));padding:18px}dialog::backdrop{background:rgba(0,0,0,.65)}
 @media(max-width:560px){.g3{grid-template-columns:1fr 1fr}.row.mobile{align-items:stretch;flex-direction:column}}
 </style>
 </head>
 <body>
 <div class="app">
-<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 1.7</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
+<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 1.8</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
 <main>
 <section id="home" class="page active">
-<div class="card soft"><div class="tiny">LIVE TEST</div><h3>Your household is ready</h3><p class="small muted">2 adults, 2 dogs, no fixed shopping day, Tesco + Aldi. Your changes stay saved on this web address.</p></div>
-<div class="card"><div class="row"><div><div class="tiny">HOUSEHOLD UNDERSTANDING</div><h2 id="score">22%</h2></div><div style="width:48%"><div class="bar"><i id="scoreBar" style="width:22%"></i></div><div class="tiny" style="margin-top:6px">Benchmarks first. One shop is evidence; repeated shops build confidence.</div></div></div></div>
-<div class="grid g3" id="homeMetrics"></div>
-<div class="card"><div class="tiny">WHAT TO DO NEXT</div><h3 id="nextTitle">Use it on your next real shop</h3><p id="nextText" class="small muted">Open the Shopping Plan. The robot has already chosen what it thinks you need. Only correct obvious mistakes.</p><button class="btn primary" id="nextBtn">Open Shopping Plan</button></div>
-<div class="card"><h3>What I think is coming up</h3><div id="homePreview" class="list"></div></div>
+<div class="card soft hubStatus">
+  <div class="row">
+    <div>
+      <div class="tiny">HOUSEHOLD STATUS</div>
+      <h2 style="margin-top:4px">Your household</h2>
+      <div id="hubStatusLine" class="small muted">Still learning your routines</div>
+    </div>
+    <div class="hubScore">
+      <div class="tiny">LEARNING</div>
+      <b id="score">22%</b>
+    </div>
+  </div>
+  <div class="bar" style="margin-top:12px"><i id="scoreBar" style="width:22%"></i></div>
+  <div id="hubEvidence" class="tiny" style="margin-top:8px">1 shop recorded · 9 categories seen</div>
+</div>
+
+<div class="hubGrid">
+  <button class="hubCard" id="hubPlan"><span class="hubIcon">🛒</span><span><b>Shopping Plan</b><small>See what the robot thinks you need</small></span></button>
+  <button class="hubCard" id="hubScan"><span class="hubIcon">📷</span><span><b>Scan a Receipt</b><small>Teach it from a real shop</small></span></button>
+  <button class="hubCard" id="hubEssentials"><span class="hubIcon">🏠</span><span><b>Household Essentials</b><small>See what it knows you regularly buy</small></span></button>
+  <button class="hubCard" id="hubBudget"><span class="hubIcon">💷</span><span><b>Budget & Spending</b><small>Manage the household shopping budget</small></span></button>
+</div>
+
+<div class="card">
+  <div class="row"><div><div class="tiny">COMING UP</div><h3 style="margin-top:4px">Likely to need soon</h3></div><button class="btn sm" id="viewAllUpcoming">View all</button></div>
+  <div id="homePreview" class="list"></div>
+</div>
+
+<div class="card soft">
+  <div class="row"><div><div class="tiny">LEARNING PROGRESS</div><div class="small muted" id="hubProgressText">Benchmarks first. Repeated shops build confidence.</div></div><button class="btn sm" id="hubHousehold">Household</button></div>
+</div>
 </section>
 
 <section id="plan" class="page">
@@ -162,10 +192,19 @@ function nav(name){$$('.page').forEach(x=>x.classList.remove('active'));$('#'+na
 $$('[data-page]').forEach(b=>b.onclick=()=>nav(b.dataset.page));
 function renderHome(){
  const s=score();$('#score').textContent=s+'%';$('#scoreBar').style.width=s+'%';
- const learned=Object.values(state.items).filter(x=>x.count>0).length;
- $('#homeMetrics').innerHTML=[['Regular categories',state.selected.length],['Seen in shops',learned],['Recorded shops',state.history.length]].map(([a,b])=>'<div class="metric"><span class="tiny">'+a+'</span><b>'+b+'</b></div>').join('');
- $('#homePreview').innerHTML=candidates().slice(0,6).map(x=>'<div class="item row"><div><b>'+x.c.name+'</b><div class="tiny">'+(x.left===null?'Starting household estimate':'about '+x.left+' days left')+'</div></div><span class="tag">'+x.c.estimate+'</span></div>').join('');
- if(state.history.length){$('#nextTitle').textContent='Keep teaching it from real shops';$('#nextText').textContent='The robot now has '+state.history.length+' recorded shop'+(state.history.length===1?'':'s')+'. Record the next one so real behaviour keeps replacing averages.';$('#nextBtn').textContent='Record a Shop';$('#nextBtn').onclick=()=>nav('record')}else{$('#nextTitle').textContent='Use it on your next real shop';$('#nextText').textContent='Open the Shopping Plan. The robot has already chosen what it thinks you need. Only correct obvious mistakes.';$('#nextBtn').textContent='Open Shopping Plan';$('#nextBtn').onclick=()=>nav('plan')}
+ const seen=Object.values(state.items).filter(x=>x.count>0).length;
+ const shopsCount=state.history.length;
+ $('#hubStatusLine').textContent=s<35?'Still learning your routines':s<60?'Learning your shopping patterns':s<80?'Knows quite a lot about your household':'Strong household understanding';
+ $('#hubEvidence').textContent=shopsCount+' recorded shop'+(shopsCount===1?'':'s')+' · '+seen+' categories seen';
+ $('#hubProgressText').textContent=shopsCount?'Real shopping is gradually replacing the starting household averages.':'Starting from household benchmarks until real shops are recorded.';
+ const upcoming=candidates().slice(0,5);
+ $('#homePreview').innerHTML=upcoming.map(x=>'<div class="item row"><div><b>'+x.c.name+'</b><div class="tiny">'+(x.left===null?'Starting household estimate':'about '+x.left+' days left')+'</div></div><span class="tag">'+x.c.estimate+'</span></div>').join('')||'<div class="item muted small">Nothing urgent is coming up yet.</div>';
+ $('#hubPlan').onclick=()=>nav('plan');
+ $('#hubScan').onclick=()=>{nav('record');setTimeout(()=>document.querySelector('#record .card')?.scrollIntoView({behavior:'smooth',block:'start'}),50)};
+ $('#hubEssentials').onclick=()=>nav('essentials');
+ $('#hubBudget').onclick=()=>nav('household');
+ $('#viewAllUpcoming').onclick=()=>nav('plan');
+ $('#hubHousehold').onclick=()=>nav('household');
 }
 function renderPlan(){
  const list=candidates(),active=list.filter(x=>state.held[x.c.id]!==true);
