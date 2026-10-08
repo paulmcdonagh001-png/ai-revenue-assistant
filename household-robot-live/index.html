@@ -40,7 +40,7 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 </head>
 <body>
 <div class="app">
-<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 2.3</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
+<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 2.4</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
 <main>
 <section id="home" class="page active">
 <div class="card soft hubStatus">
@@ -250,44 +250,7 @@ state.selected=[...new Set(state.selected||[])];
   }
  }catch(e){console.warn('Legacy learning repair skipped',e)}
 })();
-(function reclassifySavedReceiptLines(){
- try{
-  let changed=false;
-  for(const h of (state.history||[])){
-   if(!Array.isArray(h.receiptProducts))continue;
-   const kept=[];
-   for(const p of h.receiptProducts){
-    const key=productKey(p.name);
-    const mem=state.productMemory?.[key];
-    if(mem?.userCorrected){
-     p.ignored=!!mem.ignored;
-     p.category=mem.ignored?null:(mem.category||null);
-     if(!p.ignored)kept.push(p); else changed=true;
-     continue;
-    }
-    const auto=automaticCategoryFor(p.name);
-    if(auto==='__ignore__'){changed=true;continue}
-    p.ignored=false;
-    const next=auto||null;
-    if(next!==p.category){p.category=next;changed=true}
-    kept.push(p);
-   }
-   if(kept.length!==h.receiptProducts.length){h.receiptProducts=kept;h.receiptLines=kept.length;changed=true}
-   const nextItems=[...new Set(kept.filter(p=>p.category).map(p=>p.category))];
-   if(JSON.stringify(nextItems)!==JSON.stringify(h.items||[])){h.items=nextItems;changed=true}
-  }
-  for(const [key,pm] of Object.entries(state.productMemory||{})){
-   if(!pm?.userCorrected && (pm?.category||pm?.ignored)){
-    delete state.productMemory[key];
-    changed=true;
-   }
-  }
-  if(changed){
-   rebuildEvidenceFromHistory();
-   localStorage.setItem(KEY,JSON.stringify(state));
-  }
- }catch(e){console.warn('Receipt reclassification skipped',e)}
-})();
+
 
 function save(){localStorage.setItem(KEY,JSON.stringify(state))}
 function score(){
@@ -453,7 +416,7 @@ function automaticCategoryFor(name){
  if(/MILK\s+ROLLS?/.test(n))return null;
  if(/EGG\s+BITES?/.test(n))return null;
  if(/SAGE\s*&?\s*ONION\s+STUFF/.test(n))return null;
- if(/VEG\s+SPRING\s+ROLLS?/.test(n))return 'veggie';
+ if(/VEG\s+SPRING\s+ROLLS?/.test(n))return null;
  if(/SRDNE|SARDINE/.test(n))return 'fish';
  if(/CRISPY.*(?:LEMN|LEMON).*CH(?:I)?CKN|CHCKN|CHKN/.test(n))return 'chicken';
  if(/SKIM.*MILK|MILK\s+2\.272L|MILK\s+\d+(?:\.\d+)?L/.test(n))return 'milk';
@@ -655,6 +618,72 @@ function rebuildEvidenceFromHistory(){
  }
  state.items=rebuilt;
 }
+function runReceiptMigrationV24(){
+ const MIGRATION_KEY='receiptMigrationV24';
+ if(localStorage.getItem(MIGRATION_KEY)==='done')return;
+ try{
+  let changed=false;
+  for(const h of (state.history||[])){
+   if(!Array.isArray(h.receiptProducts))continue;
+   const cleaned=[];
+   for(const p of h.receiptProducts){
+    const key=productKey(p.name);
+    const mem=state.productMemory?.[key];
+
+    // Explicit user corrections always win.
+    if(mem?.userCorrected){
+     p.ignored=!!mem.ignored;
+     p.category=mem.ignored?null:(mem.category||null);
+     if(!p.ignored) cleaned.push(p);
+     else changed=true;
+     continue;
+    }
+
+    const auto=automaticCategoryFor(p.name);
+
+    // Remove obvious receipt bookkeeping from the saved shop.
+    if(auto==='__ignore__'){
+     changed=true;
+     continue;
+    }
+
+    p.ignored=false;
+    const next=auto||null;
+    if(p.category!==next){
+     p.category=next;
+     changed=true;
+    }
+    cleaned.push(p);
+   }
+
+   if(cleaned.length!==h.receiptProducts.length){
+    h.receiptProducts=cleaned;
+    changed=true;
+   }
+   h.receiptLines=cleaned.length;
+
+   const nextItems=[...new Set(cleaned.filter(p=>p.category).map(p=>p.category))];
+   if(JSON.stringify(nextItems)!==JSON.stringify(h.items||[])){
+    h.items=nextItems;
+    changed=true;
+   }
+  }
+
+  // Purge stale automatic category memory. Keep only things the user explicitly corrected.
+  for(const [key,pm] of Object.entries(state.productMemory||{})){
+   if(!pm?.userCorrected && (pm?.category||pm?.ignored)){
+    delete state.productMemory[key];
+    changed=true;
+   }
+  }
+
+  rebuildEvidenceFromHistory();
+  localStorage.setItem(KEY,JSON.stringify(state));
+  localStorage.setItem(MIGRATION_KEY,'done');
+ }catch(e){
+  console.error('Receipt migration V2.4 failed',e);
+ }
+}
 function suggestedCategoryFor(name){
  const auto=automaticCategoryFor(name);
  return auto==='__ignore__'?null:auto;
@@ -795,6 +824,6 @@ $('#photoInput').onchange=e=>{const f=e.target.files?.[0];if(f)readReceipt(f)};
 $('#uploadInput').onchange=e=>{const f=e.target.files?.[0];if(f)readReceipt(f)};
 $('#clearReceipt').onclick=()=>{state.receiptDraft=null;save();$('#receiptReviewCard').style.display='none';$('#receiptStatus').innerHTML='';$('#ocrProgressWrap').style.display='none';};
 $('#backup').onclick=()=>{const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='household-robot-live-backup.json';a.click();URL.revokeObjectURL(a.href)};
-$('#today').textContent=new Date().toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'long'});render();
+$('#today').textContent=new Date().toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'long'});runReceiptMigrationV24();render();
 </script>
 </body></html>
