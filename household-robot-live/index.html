@@ -40,7 +40,7 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 </head>
 <body>
 <div class="app">
-<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 2.6</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
+<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 2.7</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
 <main>
 <section id="home" class="page active">
 <div class="card soft hubStatus">
@@ -214,9 +214,9 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 const KEY='householdRobotLiveV0';
 const shops=['Tesco','Aldi',"Sainsbury's",'Asda','Morrisons','Waitrose','Ocado','Lidl','Other'];
 const base=[
-['milk','Milk','Food & drink',7,'6 L/week'],['bread','Bread','Food & drink',7,'2 loaves/week'],['eggs','Eggs','Food & drink',8,'12/week'],['cheese','Cheese','Food & drink',12,'1 pack'],['butter','Butter/spreads','Food & drink',18,'1 pack'],['yoghurt','Yoghurt','Food & drink',7,'1 multipack'],['cereal','Cereal/oats','Food & drink',14,'1 box'],['coffee','Coffee','Food & drink',17,'1 jar/bag'],['tea','Tea','Food & drink',30,'1 box'],['squash','Squash/cordial','Food & drink',10,'2 bottles'],['rice','Rice','Food & drink',28,'1 pack'],['pasta','Pasta/noodles','Food & drink',21,'1 pack'],['potatoes','Potatoes','Food & drink',10,'1 bag'],['ready','Ready meals / prepared food','Food & drink',7,'as bought'],['biscuits','Biscuits / snacks','Food & drink',14,'as bought'],['chicken','Chicken','Meat, fish & protein',7,'regular'],['beef','Beef','Meat, fish & protein',10,'regular'],['pork','Pork','Meat, fish & protein',10,'regular'],['lamb','Lamb','Meat, fish & protein',14,'occasional'],['turkey','Turkey','Meat, fish & protein',14,'occasional'],['fish','Fish','Meat, fish & protein',7,'regular'],['veggie','Vegetarian/vegan protein','Meat, fish & protein',10,'optional'],['fruit','Fresh fruit','Food & drink',7,'weekly'],['veg','Fresh vegetables','Food & drink',7,'weekly'],['frozen','Frozen food','Food & drink',14,'regular'],['tinned','Tinned goods','Food & drink',21,'regular'],['toilet','Toilet roll','Household',18,'9 rolls'],['kitchen','Kitchen roll','Household',21,'2 rolls'],['laundry','Laundry detergent/capsules','Household',24,'1 pack'],['dishwasher','Dishwasher tablets','Household',28,'1 pack'],['washingup','Washing-up liquid','Household',21,'1 bottle'],['bags','Bin bags','Household',28,'1 roll'],['cleaner','Cleaning spray','Household',28,'1 bottle'],['toothpaste','Toothpaste','Personal care',35,'1 tube'],['shampoo','Shampoo','Personal care',30,'1 bottle'],['shower','Shower gel','Personal care',24,'1 bottle'],['deodorant','Deodorant','Personal care',28,'1 each'],['dogwet','Dog wet food','Dogs',7,'based on 2 dogs'],['dogdry','Dog dry food/biscuits','Dogs',21,'1 bag'],['dogtreats','Dog treats/chews','Dogs',14,'1 pack'],['poobags','Poo bags','Dogs',21,'1 pack']
+['milk','Milk','Food & drink',7,'6 L/week'],['bread','Bread','Food & drink',7,'2 loaves/week'],['eggs','Eggs','Food & drink',8,'12/week'],['cheese','Cheese','Food & drink',12,'1 pack'],['butter','Butter/spreads','Food & drink',18,'1 pack'],['yoghurt','Yoghurt','Food & drink',7,'1 multipack'],['cereal','Cereal/oats','Food & drink',14,'1 box'],['coffee','Coffee','Food & drink',17,'1 jar/bag'],['tea','Tea','Food & drink',30,'1 box'],['squash','Squash/cordial','Food & drink',10,'2 bottles'],['rice','Rice','Food & drink',28,'1 pack'],['pasta','Pasta/noodles','Food & drink',21,'1 pack'],['potatoes','Potatoes','Food & drink',10,'1 bag'],['ready','Ready meals / prepared food','Food & drink',7,'as bought'],['biscuits','Biscuits','Food & drink',14,'as bought'],['crisps','Crisps / savoury snacks','Food & drink',14,'as bought'],['chicken','Chicken','Meat, fish & protein',7,'regular'],['beef','Beef','Meat, fish & protein',10,'regular'],['pork','Pork','Meat, fish & protein',10,'regular'],['lamb','Lamb','Meat, fish & protein',14,'occasional'],['turkey','Turkey','Meat, fish & protein',14,'occasional'],['fish','Fish','Meat, fish & protein',7,'regular'],['veggie','Vegetarian/vegan protein','Meat, fish & protein',10,'optional'],['fruit','Fresh fruit','Food & drink',7,'weekly'],['veg','Fresh vegetables','Food & drink',7,'weekly'],['frozen','Frozen food','Food & drink',14,'regular'],['tinned','Tinned goods','Food & drink',21,'regular'],['toilet','Toilet roll','Household',18,'9 rolls'],['kitchen','Kitchen roll','Household',21,'2 rolls'],['laundry','Laundry detergent/capsules','Household',24,'1 pack'],['dishwasher','Dishwasher tablets','Household',28,'1 pack'],['washingup','Washing-up liquid','Household',21,'1 bottle'],['bags','Bin bags','Household',28,'1 roll'],['cleaner','Cleaning spray','Household',28,'1 bottle'],['toothpaste','Toothpaste','Personal care',35,'1 tube'],['shampoo','Shampoo','Personal care',30,'1 bottle'],['shower','Shower gel','Personal care',24,'1 bottle'],['deodorant','Deodorant','Personal care',28,'1 each'],['dogwet','Dog wet food','Dogs',7,'based on 2 dogs'],['dogdry','Dog dry food/biscuits','Dogs',21,'1 bag'],['dogtreats','Dog treats/chews','Dogs',14,'1 pack'],['poobags','Poo bags','Dogs',21,'1 pack']
 ].map(x=>({id:x[0],name:x[1],group:x[2],repeat:x[3],estimate:x[4]}));
-const suggested=new Set(['milk','bread','eggs','cheese','butter','cereal','coffee','squash','rice','pasta','potatoes','ready','biscuits','chicken','beef','pork','fish','fruit','veg','frozen','tinned','toilet','kitchen','laundry','dishwasher','washingup','bags','cleaner','toothpaste','shampoo','shower','deodorant','dogwet','dogdry','dogtreats','poobags']);
+const suggested=new Set(['milk','bread','eggs','cheese','butter','cereal','coffee','squash','rice','pasta','potatoes','ready','biscuits','crisps','chicken','beef','pork','fish','fruit','veg','frozen','tinned','toilet','kitchen','laundry','dishwasher','washingup','bags','cleaner','toothpaste','shampoo','shower','deodorant','dogwet','dogdry','dogtreats','poobags']);
 const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)];
 const iso=d=>{const x=new Date(d);x.setMinutes(x.getMinutes()-x.getTimezoneOffset());return x.toISOString().slice(0,10)};
 const money=n=>'£'+Number(n||0).toFixed(2);
@@ -370,6 +370,7 @@ const categoryRules=[
  ['potatoes',/POTATO|SPUD/i],
  ['ready',/READY\s*MEAL|PIE\b|SLICE\b|EGG\s*BITES?|SPRING\s*ROLLS?|STUFFING/i],
  ['biscuits',/BISCUIT|CRUNCH\s*CREAM|COOKIES?|DIGESTIVE/i],
+ ['crisps',/CRISPS?|POTATO\s*CHIPS?|TORTILLA\s*CHIPS?/i],
  ['chicken',/CHICKEN|CHCKN|CHKN/i],
  ['beef',/\bBEEF\b|STEAK|BRISKET|BEEF\s+MINCE/i],
  ['pork',/\bPORK\b|BACON|GAMMON|PORK\s+MIN/i],
@@ -418,14 +419,15 @@ function automaticCategoryFor(name){
  if(/ORIGINAL\s+PRICE|PROMOT(?:ION|IONS)?|NECTAR\s+PRICE|PRICE\s+SAVING/.test(n))return '__ignore__';
  if(/(?:JS\s+)?MILK\s+ROLLS?(?:\s+X?\d+)?/.test(n))return 'bread';
  if(/(?:JS\s+)?12\s+EGG\s+BITES?/.test(n))return 'ready';
- if(/SAGE\s*&?\s*ONION\s+STUFF/.test(n))return 'ready';
+ if(/SAGE\s*&?\s*ONION\s+STUFF|SAGES?ONION\s+STUFF/.test(n))return 'ready';
  if(/(?:JS\s+)?VEG(?:ETABLE)?\s+SPRING\s+ROLLS?/.test(n))return 'ready';
  if(/(?:F|P)UKKA.*VEGGIE.*POTATO|VEGGIE.*POTATO.*PIE/.test(n))return 'ready';
  if(/(?:JS\s+)?2PK\s+CHEESY\s+BEAN/.test(n))return 'ready';
  if(/(?:JS\s+)?2PK.*CH(?:EES|S).*ON.*SLICE|(?:JS\s+)?2PK.*CHSERON.*SLICE/.test(n))return 'ready';
+ if(/MIXD?\s+CRISPS?(?:\s+X?\d+)?/.test(n))return 'crisps';
  if(/FOX'?S?\s+CRUNCH\s+CREAM|CRUNCH.*BIS.*CHOC/.test(n))return 'biscuits';
  if(/ANCHR?\s+UNSALT.*BTR|ANCHOR\s+UNSALTED/.test(n))return 'butter';
- if(/SRDNE|SARDINE/.test(n))return 'fish';
+ if(/SRDNE|SRONE|SARDINE/.test(n))return 'fish';
  if(/CRISPY.*(?:LEMN|LEMON).*CH(?:I)?CKN|CHCKN|CHKN/.test(n))return 'chicken';
  if(/SKIM.*MILK|MILK\s+2\.272L|MILK\s+\d+(?:\.\d+)?L/.test(n))return 'milk';
  if(/LEEKS?/.test(n))return 'veg';
@@ -446,7 +448,8 @@ function categoryFor(name){
 const receiptAliasSeeds=[
  {store:"Sainsbury's",re:/^(?:JS\s+)?MILK\s+ROLLS?(?:\s+X?\d+)?$/i,category:'bread',canonical:'Sainsbury’s Milk Rolls'},
  {store:"Sainsbury's",re:/^(?:JS\s+)?12\s+EGG\s+BITES?/i,category:'ready',canonical:'Sainsbury’s Egg Bites'},
- {store:"Sainsbury's",re:/SAGE\s*&?\s*ONION\s+STUFF/i,category:'ready',canonical:'Sage & Onion Stuffing'},
+ {store:"Sainsbury's",re:/SAGE\s*&?\s*ONION\s+STUFF|SAGES?ONION\s+STUFF/i,category:'ready',canonical:'Sage & Onion Stuffing'},
+ {store:null,re:/MIXD?\s+CRISPS?(?:\s+X?\d+)?/i,category:'crisps',canonical:'Mixed Crisps'},
  {store:"Sainsbury's",re:/VEG(?:ETABLE)?\s+SPRING\s+ROLLS?/i,category:'ready',canonical:'Vegetable Spring Rolls'},
  {store:"Sainsbury's",re:/(?:F|P)UKKA.*VEGGIE.*POTATO|VEGGIE.*POTATO.*PIE/i,category:'ready',canonical:'Pukka Veggie & Potato Pie'},
  {store:"Sainsbury's",re:/2PK\s+CHEESY\s+BEAN/i,category:'ready',canonical:'Cheesy Bean Slices'},
@@ -454,12 +457,12 @@ const receiptAliasSeeds=[
  {store:null,re:/FOX'?S?.*CRUNCH\s+CREAM|CRUNCH.*BIS.*CHOC/i,category:'biscuits',canonical:'Fox’s Crunch Creams'},
  {store:null,re:/ANCHR?\s+UNSALT.*BTR|ANCHOR\s+UNSALTED/i,category:'butter',canonical:'Anchor Unsalted Butter'},
  {store:"Sainsbury's",re:/SKIM.*MILK.*2\.272L|MILK\s+2\.272L/i,category:'milk',canonical:'Sainsbury’s Skimmed Milk 4 Pint'},
- {store:null,re:/SRDNE|SARDINE/i,category:'fish',canonical:'Sardines'},
+ {store:null,re:/SRDNE|SRONE|SARDINE/i,category:'fish',canonical:'Sardines'},
  {store:null,re:/CHCKN|CHKN|CHICKEN/i,category:'chicken',canonical:'Chicken'},
  {store:null,re:/\bLEEKS?\b/i,category:'veg',canonical:'Leeks'}
 ];
 const retailerExpansions={
- "Sainsbury's":[['JS','SAINSBURYS'],['BTR','BUTTER'],['UNSALT','UNSALTED'],['SRDNE','SARDINE'],['CHCKN','CHICKEN'],['CHKN','CHICKEN'],['VEG','VEGETABLE']],
+ "Sainsbury's":[['JS','SAINSBURYS'],['BTR','BUTTER'],['UNSALT','UNSALTED'],['SRDNE','SARDINE'],['SRONE','SARDINE'],['CHCKN','CHICKEN'],['CHKN','CHICKEN'],['VEG','VEGETABLE']],
  "Tesco":[['TSC','TESCO'],['BTR','BUTTER'],['CHKN','CHICKEN']],
  "Aldi":[['BTR','BUTTER'],['CHKN','CHICKEN']],
  "Lidl":[['BTR','BUTTER'],['CHKN','CHICKEN']],
@@ -844,6 +847,36 @@ function runReceiptMigrationV25(){
   localStorage.setItem(MIGRATION_KEY,'done');
  }catch(e){console.error('Receipt migration V2.5 failed',e)}
 }
+function runReceiptMigrationV27(){
+ const MIGRATION_KEY='receiptMigrationV27';
+ if(localStorage.getItem(MIGRATION_KEY)==='done')return;
+ try{
+  if(!state.selected.includes('crisps'))state.selected.push('crisps');
+  for(const h of (state.history||[])){
+   if(!Array.isArray(h.receiptProducts))continue;
+   for(const p of h.receiptProducts){
+    const mem=state.productMemory?.[productKey(p.name)];
+    if(mem?.userCorrected){
+     p.ignored=!!mem.ignored;
+     p.category=mem.ignored?null:(mem.category||null);
+     continue;
+    }
+    const r=resolveReceiptItem(p.name,h.store||'');
+    p.ignored=!!r.ignored;
+    p.category=r.ignored?null:(r.category||null);
+    p.source=r.source||p.source||null;
+    p.canonical=r.canonical||p.canonical||p.name;
+    p.confidence=r.confidence||0;
+   }
+   h.receiptProducts=h.receiptProducts.filter(p=>!p.ignored);
+   h.receiptLines=h.receiptProducts.length;
+   h.items=[...new Set(h.receiptProducts.filter(p=>p.category).map(p=>p.category))];
+  }
+  rebuildEvidenceFromHistory();
+  localStorage.setItem(KEY,JSON.stringify(state));
+  localStorage.setItem(MIGRATION_KEY,'done');
+ }catch(e){console.error('Receipt migration V2.7 failed',e)}
+}
 function suggestedCategoryFor(name){
  const auto=automaticCategoryFor(name);
  return auto==='__ignore__'?null:auto;
@@ -984,6 +1017,6 @@ $('#photoInput').onchange=e=>{const f=e.target.files?.[0];if(f)readReceipt(f)};
 $('#uploadInput').onchange=e=>{const f=e.target.files?.[0];if(f)readReceipt(f)};
 $('#clearReceipt').onclick=()=>{state.receiptDraft=null;save();$('#receiptReviewCard').style.display='none';$('#receiptStatus').innerHTML='';$('#ocrProgressWrap').style.display='none';};
 $('#backup').onclick=()=>{const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='household-robot-live-backup.json';a.click();URL.revokeObjectURL(a.href)};
-$('#today').textContent=new Date().toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'long'});runReceiptMigrationV24();runReceiptMigrationV25();render();
+$('#today').textContent=new Date().toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'long'});runReceiptMigrationV24();runReceiptMigrationV25();runReceiptMigrationV27();render();
 </script>
 </body></html>
