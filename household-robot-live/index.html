@@ -28,7 +28,7 @@ dialog{border:1px solid var(--line);background:var(--panel);color:var(--text);bo
 </head>
 <body>
 <div class="app">
-<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 1.5</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
+<header class="top"><div class="brand"><div><h1>Household Robot <span class="mini">LIVE TEST · BUILD 1.6</span></h1><div id="today" class="mini"></div></div><button class="btn sm" id="tourBtn">How to use</button></div></header>
 <main>
 <section id="home" class="page active">
 <div class="card soft"><div class="tiny">LIVE TEST</div><h3>Your household is ready</h3><p class="small muted">2 adults, 2 dogs, no fixed shopping day, Tesco + Aldi. Your changes stay saved on this web address.</p></div>
@@ -324,8 +324,8 @@ function applyReceiptDraft(){
   const cat=it.category?base.find(c=>c.id===it.category):null;
   return '<div class="item"><div class="row"><label style="display:flex;gap:10px;align-items:flex-start;margin:0;color:var(--text);flex:1"><input type="checkbox" data-ri="'+i+'" '+(it.include?'checked':'')+' style="width:22px;min-height:22px"><span><b>'+escapeHtml(it.name)+'</b><span class="tiny" style="display:block">'+money(it.price)+'</span></span></label><span class="tag '+(cat?'':'')+'">'+(cat?'Matched':'Needs check')+'</span></div><div style="margin-top:8px"><select data-rc="'+i+'">'+options+'</select></div></div>'
  }).join('');
- $('[data-rc]').forEach(sel=>{const i=Number(sel.dataset.rc);sel.value=d.items[i].category||'';sel.onchange=()=>{d.items[i].category=sel.value||null;d.items[i].confidence=sel.value?'user':'check';save();applyReceiptDraft()}});
- $('[data-ri]').forEach(ch=>{const i=Number(ch.dataset.ri);ch.onchange=()=>{d.items[i].include=ch.checked;save()}});
+ $$('[data-rc]').forEach(sel=>{const i=Number(sel.dataset.rc);sel.value=d.items[i].category||'';sel.onchange=()=>{d.items[i].category=sel.value||null;d.items[i].confidence=sel.value?'user':'check';save();applyReceiptDraft()}});
+ $$('[data-ri]').forEach(ch=>{const i=Number(ch.dataset.ri);ch.onchange=()=>{d.items[i].include=ch.checked;save()}});
  // Preselect recognised household categories in the ordinary confirmation list.
  setTimeout(()=>{d.items.filter(x=>x.include&&x.category).forEach(x=>{const cb=document.querySelector('[data-rec="'+x.category+'"]');if(cb)cb.checked=true})},0);
 }
@@ -334,7 +334,7 @@ function escapeHtml(s){return String(s).replace(/[&<>"']/g,ch=>({'&':'&amp;','<'
 function renderRecord(){
  $('#store').innerHTML=shops.map(x=>'<option>'+x+'</option>').join('');if(!$('#shopDate').value)$('#shopDate').value=iso(new Date());
  $('#recordList').innerHTML=state.selected.map(id=>base.find(x=>x.id===id)).filter(Boolean).map(c=>{const selected=state.planned.includes(c.id);return '<label class="item recordItem '+(selected?'selected':'')+'" style="display:flex;gap:10px;align-items:center;margin:0;color:var(--text)"><input type="checkbox" data-rec="'+c.id+'" '+(selected?'checked':'')+'><span><b>'+c.name+'</b><span class="tiny" style="display:block">'+c.estimate+'</span></span></label>'}).join('');
- $('[data-rec]').forEach(cb=>cb.onchange=()=>cb.closest('.recordItem')?.classList.toggle('selected',cb.checked));
+ $$('[data-rec]').forEach(cb=>cb.onchange=()=>cb.closest('.recordItem')?.classList.toggle('selected',cb.checked));
  $('#history').innerHTML=state.history.slice().reverse().slice(0,8).map(h=>'<div class="item row"><div><b>'+h.store+'</b><div class="tiny">'+new Date(h.date).toLocaleDateString()+' · '+h.items.length+' categories'+(h.receiptLines?' · '+h.receiptLines+' receipt lines':'')+'</div></div><b>'+(h.total?money(h.total):'—')+'</b></div>').join('')||'<div class="item muted small">No shops recorded yet.</div>';
  applyReceiptDraft()
 }
